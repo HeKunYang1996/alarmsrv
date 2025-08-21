@@ -17,6 +17,8 @@ import uvicorn
 from app.core.config import settings
 from app.core.database import init_database
 from app.services.alert_rule_service import alert_rule_service
+from app.services.alert_service import alert_service
+from app.services.alarm_monitor import alarm_monitor
 from app.models.alert_rule import AlertRule
 
 # 配置日志
@@ -60,16 +62,35 @@ async def startup_event():
     
     logger.info("数据库初始化成功")
     
+    # 启动告警监控引擎
+    logger.info("启动告警监控引擎...")
+    try:
+        alarm_monitor.start()
+        logger.info("告警监控引擎启动成功")
+    except Exception as e:
+        logger.error(f"告警监控启动失败: {e}")
+        # 监控启动失败不影响主服务
+    
     # 记录服务启动信息
     logger.info(f"告警服务启动成功")
     logger.info(f"数据库路径: {settings.DATABASE_PATH}")
     logger.info(f"Redis连接: {settings.REDIS_HOST}:{settings.REDIS_PORT}")
+    logger.info(f"数据监控间隔: {settings.DATA_FETCH_INTERVAL}秒")
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """应用关闭时的清理操作"""
     logger.info("关闭告警服务...")
+    
+    # 停止告警监控引擎
+    try:
+        await alarm_monitor.stop()
+        logger.info("告警监控引擎已停止")
+    except Exception as e:
+        logger.error(f"停止监控引擎失败: {e}")
+    
+    logger.info("告警服务已关闭")
 
 
 @app.get("/")
@@ -91,13 +112,21 @@ async def health_check():
         rule_count = alert_rule_service.get_rule_count()
         enabled_count = alert_rule_service.get_enabled_rule_count()
         
+        # 检查告警统计
+        alert_stats = alert_service.get_alert_statistics()
+        
+        # 检查监控状态
+        monitor_status = alarm_monitor.get_monitor_status()
+        
         return {
             "status": "healthy",
             "database": "connected",
             "rules": {
                 "total": rule_count,
                 "enabled": enabled_count
-            }
+            },
+            "alerts": alert_stats.get("data", {}),
+            "monitor": monitor_status
         }
     except Exception as e:
         logger.error(f"健康检查失败: {e}")
@@ -110,24 +139,90 @@ async def create_alert_rule(rule_data: dict):
     """创建告警规则"""
     try:
         # 验证必需字段
-        required_fields = ["channel_id", "data_type", "point_id", "rule_name", "warning_level", "operator", "value"]
-        for field in required_fields:
-            if field not in rule_data:
-                return {
-                    "success": False,
-                    "message": f"缺少必需字段: {field}",
-                    "data": {}
+        required_fields = {
+            "channel_id": "通道ID", 
+            "data_type": "数据类型", 
+            "point_id": "点位ID", 
+            "rule_name": "规则名称", 
+            "warning_level": "告警级别", 
+            "operator": "比较操作符", 
+            "value": "阈值"
+        }
+        
+        missing_fields = []
+        for field, field_name in required_fields.items():
+            if field not in rule_data or rule_data[field] is None:
+                missing_fields.append(f"{field_name}({field})")
+        
+        if missing_fields:
+            return {
+                "success": False,
+                "message": f"缺少必需字段: {', '.join(missing_fields)}",
+                "data": {
+                    "missing_fields": list(required_fields.keys()),
+                    "example": {
+                        "service_type": "comsrv",
+                        "channel_id": 1,
+                        "data_type": "T",
+                        "point_id": 100,
+                        "rule_name": "温度告警",
+                        "warning_level": 2,
+                        "operator": ">",
+                        "value": 50.0,
+                        "description": "温度超过50度时告警",
+                        "enabled": True
+                    }
                 }
+            }
+        
+        # 验证数据类型
+        try:
+            # 确保数值字段为正确类型
+            rule_data["channel_id"] = int(rule_data["channel_id"])
+            rule_data["point_id"] = int(rule_data["point_id"])
+            rule_data["warning_level"] = int(rule_data["warning_level"])
+            rule_data["value"] = float(rule_data["value"])
+        except (ValueError, TypeError) as e:
+            return {
+                "success": False,
+                "message": f"数据类型错误: channel_id、point_id、warning_level必须为整数，value必须为数值",
+                "data": {"type_error": str(e)}
+            }
         
         # 创建AlertRule对象
         rule = AlertRule.from_dict(rule_data)
         
-        # 验证规则
-        if not rule.validate():
+        # 详细验证规则
+        is_valid, error_message = rule.validate_detailed()
+        if not is_valid:
             return {
                 "success": False,
-                "message": "规则验证失败",
-                "data": {}
+                "message": f"规则验证失败: {error_message}",
+                "data": {
+                    "validation_error": error_message,
+                    "current_data": rule_data
+                }
+            }
+        
+        # 检查是否存在相同的规则配置
+        existing_rules = alert_rule_service.get_rules_by_service_channel_point(
+            rule.service_type, rule.channel_id, rule.data_type, rule.point_id
+        )
+        
+        if existing_rules:
+            existing_rule = existing_rules[0]
+            return {
+                "success": False,
+                "message": f"已存在相同的规则配置 (服务类型:{rule.service_type}, 通道:{rule.channel_id}, 数据类型:{rule.data_type}, 点位:{rule.point_id})",
+                "data": {
+                    "conflict": "规则重复",
+                    "existing_rule": {
+                        "id": existing_rule.id,
+                        "rule_name": existing_rule.rule_name,
+                        "created_at": existing_rule.created_at.isoformat() if existing_rule.created_at else None
+                    },
+                    "suggestion": f"请更换其他点位或修改现有规则 ID:{existing_rule.id}"
+                }
             }
         
         # 创建规则
@@ -135,22 +230,39 @@ async def create_alert_rule(rule_data: dict):
         if rule_id:
             return {
                 "success": True,
-                "message": "告警规则创建成功",
-                "data": {"rule_id": rule_id}
+                "message": f"告警规则'{rule.rule_name}'创建成功",
+                "data": {
+                    "rule_id": rule_id,
+                    "rule_name": rule.rule_name,
+                    "redis_key": rule.redis_key(),
+                    "monitoring": rule.enabled
+                }
             }
         else:
             return {
                 "success": False,
-                "message": "创建规则失败",
-                "data": {}
+                "message": "数据库创建失败，请检查数据库连接和权限",
+                "data": {"database_error": "insert operation failed"}
             }
             
+    except KeyError as e:
+        return {
+            "success": False,
+            "message": f"请求数据格式错误，缺少字段: {str(e)}",
+            "data": {"format_error": str(e)}
+        }
+    except ValueError as e:
+        return {
+            "success": False,
+            "message": f"数据值错误: {str(e)}",
+            "data": {"value_error": str(e)}
+        }
     except Exception as e:
         logger.error(f"创建告警规则失败: {e}")
         return {
             "success": False,
-            "message": f"创建失败: {str(e)}",
-            "data": {}
+            "message": f"系统内部错误: {str(e)}",
+            "data": {"system_error": str(e)}
         }
 
 
@@ -300,6 +412,8 @@ async def update_alert_rule(rule_id: int, rule_data: dict):
         # 更新规则
         success = alert_rule_service.update_rule(rule)
         if success:
+            # 通知监控引擎规则已更新
+            alarm_monitor.on_rule_updated(rule_id)
             return {
                 "success": True,
                 "message": "告警规则更新成功",
@@ -325,6 +439,9 @@ async def update_alert_rule(rule_id: int, rule_data: dict):
 async def delete_alert_rule(rule_id: int):
     """删除告警规则"""
     try:
+        # 先通知监控引擎处理相关告警
+        alarm_monitor.on_rule_deleted(rule_id)
+        
         success = alert_rule_service.delete_rule(rule_id)
         if success:
             return {
@@ -354,6 +471,8 @@ async def enable_alert_rule(rule_id: int):
     try:
         success = alert_rule_service.enable_rule(rule_id)
         if success:
+            # 通知监控引擎规则已启用
+            alarm_monitor.on_rule_updated(rule_id)
             return {
                 "success": True,
                 "message": "告警规则启用成功",
@@ -381,6 +500,8 @@ async def disable_alert_rule(rule_id: int):
     try:
         success = alert_rule_service.disable_rule(rule_id)
         if success:
+            # 通知监控引擎规则已禁用（将解除相关告警）
+            alarm_monitor.on_rule_updated(rule_id)
             return {
                 "success": True,
                 "message": "告警规则禁用成功",
@@ -398,6 +519,235 @@ async def disable_alert_rule(rule_id: int):
         return {
             "success": False,
             "message": f"禁用失败: {str(e)}",
+            "data": {}
+        }
+
+
+# ==================== 告警管理API ====================
+
+@app.get("/alarmApi/alerts")
+async def list_alerts(
+    keyword: str = Query("", description="关键词搜索，支持规则名称、通道ID、点位ID"),
+    service_type: str = Query("", description="服务类型过滤"),
+    warning_level: Optional[int] = Query(None, description="告警级别过滤"),
+    start_time: Optional[str] = Query(None, description="开始时间"),
+    end_time: Optional[str] = Query(None, description="结束时间"),
+    page: int = Query(1, ge=1, description="页码"),
+    page_size: int = Query(10, ge=1, le=100, description="每页大小")
+):
+    """获取当前告警列表"""
+    try:
+        # 时间参数转换
+        start_datetime = None
+        end_datetime = None
+        
+        if start_time:
+            try:
+                start_datetime = datetime.fromisoformat(start_time.replace(' ', 'T'))
+            except ValueError:
+                return {
+                    "success": False,
+                    "message": "开始时间格式错误",
+                    "data": {"total": 0, "list": []}
+                }
+        
+        if end_time:
+            try:
+                end_datetime = datetime.fromisoformat(end_time.replace(' ', 'T'))
+            except ValueError:
+                return {
+                    "success": False,
+                    "message": "结束时间格式错误",
+                    "data": {"total": 0, "list": []}
+                }
+        
+        # 执行搜索
+        result = alert_service.search_alerts(
+            keyword=keyword,
+            warning_level=warning_level,
+            service_type=service_type,
+            start_time=start_datetime,
+            end_time=end_datetime,
+            page=page,
+            page_size=page_size
+        )
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"获取告警列表失败: {e}")
+        return {
+            "success": False,
+            "message": f"查询失败: {str(e)}",
+            "data": {"total": 0, "list": []}
+        }
+
+
+@app.get("/alarmApi/alerts/{alert_id}")
+async def get_alert(alert_id: int):
+    """获取指定告警详情"""
+    try:
+        alert = alert_service.get_alert_by_id(alert_id)
+        if alert:
+            return {
+                "success": True,
+                "message": "获取告警成功",
+                "data": {
+                    "total": 1,
+                    "list": [alert.to_dict()]
+                }
+            }
+        else:
+            return {
+                "success": False,
+                "message": "告警不存在",
+                "data": {"total": 0, "list": []}
+            }
+            
+    except Exception as e:
+        logger.error(f"获取告警失败: {e}")
+        return {
+            "success": False,
+            "message": f"获取失败: {str(e)}",
+            "data": {"total": 0, "list": []}
+        }
+
+
+@app.patch("/alarmApi/alerts/{alert_id}/resolve")
+async def resolve_alert(alert_id: int, resolve_data: dict = None):
+    """手动解除告警"""
+    try:
+        recovery_value = resolve_data.get("recovery_value") if resolve_data else None
+        
+        success = alert_service.resolve_alert(alert_id, recovery_value)
+        if success:
+            return {
+                "success": True,
+                "message": "告警已解除",
+                "data": {"alert_id": alert_id}
+            }
+        else:
+            return {
+                "success": False,
+                "message": "告警不存在或解除失败",
+                "data": {}
+            }
+            
+    except Exception as e:
+        logger.error(f"解除告警失败: {e}")
+        return {
+            "success": False,
+            "message": f"解除失败: {str(e)}",
+            "data": {}
+        }
+
+
+@app.get("/alarmApi/alert-events")
+async def list_alert_events(
+    keyword: str = Query("", description="关键词搜索"),
+    service_type: str = Query("", description="服务类型过滤"),
+    warning_level: Optional[int] = Query(None, description="告警级别过滤"),
+    event_type: str = Query("", description="事件类型：trigger/recovery"),
+    start_time: Optional[str] = Query(None, description="开始时间"),
+    end_time: Optional[str] = Query(None, description="结束时间"),
+    page: int = Query(1, ge=1, description="页码"),
+    page_size: int = Query(10, ge=1, le=100, description="每页大小")
+):
+    """获取告警事件历史"""
+    try:
+        # 时间参数转换
+        start_datetime = None
+        end_datetime = None
+        
+        if start_time:
+            try:
+                start_datetime = datetime.fromisoformat(start_time.replace(' ', 'T'))
+            except ValueError:
+                return {
+                    "success": False,
+                    "message": "开始时间格式错误",
+                    "data": {"total": 0, "list": []}
+                }
+        
+        if end_time:
+            try:
+                end_datetime = datetime.fromisoformat(end_time.replace(' ', 'T'))
+            except ValueError:
+                return {
+                    "success": False,
+                    "message": "结束时间格式错误",
+                    "data": {"total": 0, "list": []}
+                }
+        
+        # 执行查询
+        result = alert_service.get_alert_events(
+            keyword=keyword,
+            warning_level=warning_level,
+            service_type=service_type,
+            event_type=event_type,
+            start_time=start_datetime,
+            end_time=end_datetime,
+            page=page,
+            page_size=page_size
+        )
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"获取告警事件失败: {e}")
+        return {
+            "success": False,
+            "message": f"查询失败: {str(e)}",
+            "data": {"total": 0, "list": []}
+        }
+
+
+@app.get("/alarmApi/alert-statistics")
+async def get_alert_statistics():
+    """获取告警统计信息"""
+    try:
+        return alert_service.get_alert_statistics()
+    except Exception as e:
+        logger.error(f"获取告警统计失败: {e}")
+        return {
+            "success": False,
+            "message": f"获取失败: {str(e)}",
+            "data": {}
+        }
+
+
+# ==================== 监控管理API ====================
+
+@app.get("/alarmApi/monitor/status")
+async def get_monitor_status():
+    """获取监控状态"""
+    try:
+        status = alarm_monitor.get_monitor_status()
+        return {
+            "success": True,
+            "message": "获取监控状态成功",
+            "data": status
+        }
+    except Exception as e:
+        logger.error(f"获取监控状态失败: {e}")
+        return {
+            "success": False,
+            "message": f"获取失败: {str(e)}",
+            "data": {}
+        }
+
+
+@app.post("/alarmApi/monitor/check-rule/{rule_id}")
+async def manual_check_rule(rule_id: int):
+    """手动检查指定规则"""
+    try:
+        result = await alarm_monitor.manual_check_rule(rule_id)
+        return result
+    except Exception as e:
+        logger.error(f"手动检查规则失败: {e}")
+        return {
+            "success": False,
+            "message": f"检查失败: {str(e)}",
             "data": {}
         }
 

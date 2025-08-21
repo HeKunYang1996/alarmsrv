@@ -133,6 +133,50 @@ class AlertRule:
             
         return True
 
+    def validate_detailed(self) -> tuple[bool, str]:
+        """详细验证规则有效性，返回验证结果和错误信息"""
+        if not self.service_type or self.service_type.strip() == "":
+            return False, "服务类型不能为空"
+            
+        # 暂时只支持这些服务类型
+        valid_services = ["comsrv", "rulesrv", "modsrv", "alarmsrv", "hissrv", "netsrv"]
+        if self.service_type not in valid_services:
+            return False, f"不支持的服务类型'{self.service_type}'，支持的类型: {', '.join(valid_services)}"
+        
+        if not self.channel_id or self.channel_id <= 0:
+            return False, f"通道ID必须大于0，当前值: {self.channel_id}"
+        
+        if self.data_type not in ["T", "S", "C", "A"]:
+            return False, f"不支持的数据类型'{self.data_type}'，支持的类型: T(温度), S(状态), C(通信), A(模拟量)"
+            
+        if not self.point_id or self.point_id <= 0:
+            return False, f"点位ID必须大于0，当前值: {self.point_id}"
+            
+        if not self.rule_name or self.rule_name.strip() == "":
+            return False, "规则名称不能为空"
+            
+        if self.warning_level not in [1, 2, 3]:
+            return False, f"告警级别必须为1(一般)、2(重要)或3(紧急)，当前值: {self.warning_level}"
+            
+        if self.operator not in [">", "<", ">=", "<=", "==", "!="]:
+            return False, f"不支持的比较操作符'{self.operator}'，支持的操作符: >, <, >=, <=, ==, !="
+        
+        # 检查规则名称长度
+        if len(self.rule_name.strip()) > 100:
+            return False, f"规则名称过长，最大100字符，当前: {len(self.rule_name)}字符"
+        
+        # 检查描述长度
+        if self.description and len(self.description) > 500:
+            return False, f"描述过长，最大500字符，当前: {len(self.description)}字符"
+        
+        try:
+            # 验证阈值是否为有效数值
+            float(self.value)
+        except (ValueError, TypeError):
+            return False, f"阈值必须为有效数值，当前值: {self.value}"
+            
+        return True, "验证通过"
+
     def evaluate(self, current_value: float) -> bool:
         """评估规则是否触发"""
         if not self.enabled:

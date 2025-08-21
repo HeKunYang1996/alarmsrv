@@ -4,5 +4,7 @@
 """
 
 from .alert_rule import AlertRule, WarningLevel, ComparisonOperator, DataType, ServiceType
+from .alert import Alert, AlertEvent, AlertStatus, EventType
 
-__all__ = ["AlertRule", "WarningLevel", "ComparisonOperator", "DataType", "ServiceType"]
+__all__ = ["AlertRule", "WarningLevel", "ComparisonOperator", "DataType", "ServiceType", 
+           "Alert", "AlertEvent", "AlertStatus", "EventType"]

@@ -86,6 +86,56 @@ class DatabaseManager:
     def create_tables(self, conn: sqlite3.Connection):
         """创建表结构"""
         try:
+            # 创建alert表（当前告警）
+            create_alert_sql = """
+            CREATE TABLE IF NOT EXISTS alert (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                rule_id INTEGER NOT NULL,
+                rule_snapshot TEXT NOT NULL DEFAULT '{}',
+                service_type TEXT NOT NULL,
+                channel_id INTEGER NOT NULL,
+                data_type TEXT NOT NULL,
+                point_id INTEGER NOT NULL,
+                rule_name TEXT NOT NULL,
+                warning_level INTEGER NOT NULL,
+                operator TEXT NOT NULL,
+                threshold_value REAL NOT NULL,
+                current_value REAL NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active',
+                triggered_at TIMESTAMP NOT NULL,
+                UNIQUE(rule_id),
+                FOREIGN KEY (rule_id) REFERENCES alert_rule (id) ON DELETE CASCADE
+            );
+            """
+            
+            conn.execute(create_alert_sql)
+            
+            # 创建alert_event表（告警历史）
+            create_alert_event_sql = """
+            CREATE TABLE IF NOT EXISTS alert_event (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                rule_id INTEGER NOT NULL,
+                rule_snapshot TEXT NOT NULL DEFAULT '{}',
+                service_type TEXT NOT NULL,
+                channel_id INTEGER NOT NULL,
+                data_type TEXT NOT NULL,
+                point_id INTEGER NOT NULL,
+                rule_name TEXT NOT NULL,
+                warning_level INTEGER NOT NULL,
+                operator TEXT NOT NULL,
+                threshold_value REAL NOT NULL,
+                trigger_value REAL NOT NULL,
+                recovery_value REAL,
+                event_type TEXT NOT NULL CHECK(event_type IN ('trigger', 'recovery')),
+                triggered_at TIMESTAMP NOT NULL,
+                recovered_at TIMESTAMP,
+                duration INTEGER,
+                FOREIGN KEY (rule_id) REFERENCES alert_rule (id) ON DELETE CASCADE
+            );
+            """
+            
+            conn.execute(create_alert_event_sql)
+            
             # 创建alert_rule表
             create_alert_rule_sql = """
             CREATE TABLE IF NOT EXISTS alert_rule (
@@ -110,6 +160,7 @@ class DatabaseManager:
             
             # 创建索引以提高查询性能
             indexes = [
+                # alert_rule表索引
                 "CREATE INDEX IF NOT EXISTS idx_alert_rule_service_channel_type_point ON alert_rule(service_type, channel_id, data_type, point_id);",
                 "CREATE INDEX IF NOT EXISTS idx_alert_rule_service_type ON alert_rule(service_type);",
                 "CREATE INDEX IF NOT EXISTS idx_alert_rule_enabled ON alert_rule(enabled);",
@@ -117,22 +168,41 @@ class DatabaseManager:
                 "CREATE INDEX IF NOT EXISTS idx_alert_rule_created_at ON alert_rule(created_at);",
                 "CREATE INDEX IF NOT EXISTS idx_alert_rule_rule_name ON alert_rule(rule_name);",
                 "CREATE INDEX IF NOT EXISTS idx_alert_rule_description ON alert_rule(description);",
+                
+                # alert表索引
+                "CREATE INDEX IF NOT EXISTS idx_alert_rule_id ON alert(rule_id);",
+                "CREATE INDEX IF NOT EXISTS idx_alert_service_channel ON alert(service_type, channel_id);",
+                "CREATE INDEX IF NOT EXISTS idx_alert_warning_level ON alert(warning_level);",
+                "CREATE INDEX IF NOT EXISTS idx_alert_triggered_at ON alert(triggered_at);",
+                "CREATE INDEX IF NOT EXISTS idx_alert_status ON alert(status);",
+                
+                # alert_event表索引
+                "CREATE INDEX IF NOT EXISTS idx_alert_event_rule_id ON alert_event(rule_id);",
+                "CREATE INDEX IF NOT EXISTS idx_alert_event_service_channel ON alert_event(service_type, channel_id);",
+                "CREATE INDEX IF NOT EXISTS idx_alert_event_warning_level ON alert_event(warning_level);",
+                "CREATE INDEX IF NOT EXISTS idx_alert_event_triggered_at ON alert_event(triggered_at);",
+                "CREATE INDEX IF NOT EXISTS idx_alert_event_recovered_at ON alert_event(recovered_at);",
+                "CREATE INDEX IF NOT EXISTS idx_alert_event_event_type ON alert_event(event_type);",
             ]
             
             for index_sql in indexes:
                 conn.execute(index_sql)
             
             # 创建更新时间触发器
-            trigger_sql = """
-            CREATE TRIGGER IF NOT EXISTS update_alert_rule_timestamp 
-            AFTER UPDATE ON alert_rule
-            FOR EACH ROW
-            BEGIN
-                UPDATE alert_rule SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
-            END;
-            """
+            triggers = [
+                # alert_rule表触发器
+                """
+                CREATE TRIGGER IF NOT EXISTS update_alert_rule_timestamp 
+                AFTER UPDATE ON alert_rule
+                FOR EACH ROW
+                BEGIN
+                    UPDATE alert_rule SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+                END;
+                """,
+            ]
             
-            conn.execute(trigger_sql)
+            for trigger_sql in triggers:
+                conn.execute(trigger_sql)
             
             conn.commit()
             logger.info("数据表创建完成")
