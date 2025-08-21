@@ -96,7 +96,6 @@ for i in {1..6}; do
         echo "📱 服务地址: http://localhost:6002"
         echo "📊 健康检查: http://localhost:6002/health"
         echo "📖 API文档: http://localhost:6002/docs"
-        echo "🔧 告警规则管理: http://localhost:6002/api/rules"
         break
     else
         if [ $i -eq 6 ]; then

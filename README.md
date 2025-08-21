@@ -95,18 +95,18 @@ python3 test_db.py
 - `GET /docs` - API文档 (Swagger UI)
 
 ### 告警规则接口
-- `POST /api/rules` - 创建告警规则
-- `GET /api/rules` - 获取告警规则列表
-- `GET /api/rules/{rule_id}` - 获取指定规则
-- `PUT /api/rules/{rule_id}` - 更新告警规则
-- `DELETE /api/rules/{rule_id}` - 删除告警规则
-- `PATCH /api/rules/{rule_id}/enable` - 启用规则
-- `PATCH /api/rules/{rule_id}/disable` - 禁用规则
-- `GET /api/rules/channel/{channel_id}` - 获取指定通道的规则
+- `POST /alarmApi/rules` - 创建告警规则
+- `GET /alarmApi/rules` - 获取告警规则列表
+- `GET /alarmApi/rules/{rule_id}` - 获取指定规则
+- `PUT /alarmApi/rules/{rule_id}` - 更新告警规则
+- `DELETE /alarmApi/rules/{rule_id}` - 删除告警规则
+- `PATCH /alarmApi/rules/{rule_id}/enable` - 启用规则
+- `PATCH /alarmApi/rules/{rule_id}/disable` - 禁用规则
+- `GET /alarmApi/rules/channel/{channel_id}` - 获取指定通道的规则
 
 ### 示例：创建告警规则
 ```bash
-curl -X POST "http://localhost:6003/api/rules" \
+curl -X POST "http://localhost:6003/alarmApi/rules" \
   -H "Content-Type: application/json" \
   -d '{
     "channel_id": 1001,

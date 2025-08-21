@@ -105,7 +105,7 @@ async def health_check():
 
 
 # 告警规则API端点
-@app.post("/api/rules", response_model=dict)
+@app.post("/alarmApi/rules", response_model=dict)
 async def create_alert_rule(rule_data: dict):
     """创建告警规则"""
     try:
@@ -154,7 +154,7 @@ async def create_alert_rule(rule_data: dict):
         }
 
 
-@app.get("/api/rules/{rule_id}")
+@app.get("/alarmApi/rules/{rule_id}")
 async def get_alert_rule(rule_id: int):
     """获取指定ID的告警规则"""
     try:
@@ -190,7 +190,7 @@ async def get_alert_rule(rule_id: int):
         }
 
 
-@app.get("/api/rules")
+@app.get("/alarmApi/rules")
 async def list_alert_rules(
     keyword: str = Query("", description="关键词搜索，支持规则名称、描述、通道ID、点位ID"),
     service_type: str = Query("", description="服务类型过滤：comsrv, rulesrv, modsrv等"),
@@ -250,7 +250,7 @@ async def list_alert_rules(
         }
 
 
-@app.get("/api/rules/channel/{channel_id}")
+@app.get("/alarmApi/rules/channel/{channel_id}")
 async def get_channel_rules(
     channel_id: int,
     service_type: str = Query("", description="服务类型，如：comsrv")
@@ -287,7 +287,7 @@ async def get_channel_rules(
         }
 
 
-@app.put("/api/rules/{rule_id}")
+@app.put("/alarmApi/rules/{rule_id}")
 async def update_alert_rule(rule_id: int, rule_data: dict):
     """更新告警规则"""
     try:
@@ -321,7 +321,7 @@ async def update_alert_rule(rule_id: int, rule_data: dict):
         }
 
 
-@app.delete("/api/rules/{rule_id}")
+@app.delete("/alarmApi/rules/{rule_id}")
 async def delete_alert_rule(rule_id: int):
     """删除告警规则"""
     try:
@@ -348,7 +348,7 @@ async def delete_alert_rule(rule_id: int):
         }
 
 
-@app.patch("/api/rules/{rule_id}/enable")
+@app.patch("/alarmApi/rules/{rule_id}/enable")
 async def enable_alert_rule(rule_id: int):
     """启用告警规则"""
     try:
@@ -375,7 +375,7 @@ async def enable_alert_rule(rule_id: int):
         }
 
 
-@app.patch("/api/rules/{rule_id}/disable")
+@app.patch("/alarmApi/rules/{rule_id}/disable")
 async def disable_alert_rule(rule_id: int):
     """禁用告警规则"""
     try:
