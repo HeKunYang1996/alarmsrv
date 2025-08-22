@@ -11,9 +11,11 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from typing import Optional
 from datetime import datetime
 import uvicorn
+import io
 
 from app.core.config import settings
 from app.core.database import init_database
@@ -305,7 +307,7 @@ async def get_alert_rule(rule_id: int):
 
 @app.get("/alarmApi/rules")
 async def list_alert_rules(
-    keyword: str = Query("", description="关键词搜索，支持规则名称、描述、通道ID、点位ID"),
+    keyword: str = Query("", description="关键词搜索，支持模糊匹配：规则名称、描述、通道ID、点位ID"),
     service_type: str = Query("", description="服务类型过滤：comsrv, rulesrv, modsrv等"),
     warning_level: Optional[int] = Query(None, description="告警级别过滤：1=低级, 2=中级, 3=高级"),
     enabled: Optional[bool] = Query(None, description="启用状态过滤"),
@@ -645,7 +647,7 @@ async def resolve_alert(alert_id: int, resolve_data: dict = None):
 
 @app.get("/alarmApi/alert-events")
 async def list_alert_events(
-    keyword: str = Query("", description="关键词搜索"),
+    keyword: str = Query("", description="关键词搜索，支持模糊匹配：规则名称、通道ID、点位ID"),
     service_type: str = Query("", description="服务类型过滤"),
     warning_level: Optional[int] = Query(None, description="告警级别过滤"),
     event_type: str = Query("", description="事件类型：trigger/recovery"),
@@ -701,6 +703,66 @@ async def list_alert_events(
             "message": f"查询失败: {str(e)}",
             "data": {"total": 0, "list": []}
         }
+
+
+@app.get("/alarmApi/alert-events/export")
+async def export_alert_events(
+    keyword: str = Query("", description="关键词搜索，支持模糊匹配：规则名称、通道ID、点位ID"),
+    service_type: str = Query("", description="服务类型过滤：comsrv, rulesrv, modsrv等"),
+    warning_level: Optional[int] = Query(None, description="告警级别过滤：1=一般, 2=重要, 3=紧急"),
+    event_type: str = Query("", description="事件类型过滤：trigger=触发, recovery=恢复"),
+    start_time: Optional[str] = Query(None, description="开始时间，格式：YYYY-MM-DD HH:MM:SS"),
+    end_time: Optional[str] = Query(None, description="结束时间，格式：YYYY-MM-DD HH:MM:SS")
+):
+    """导出告警事件历史为CSV文件"""
+    try:
+        # 时间参数转换
+        start_datetime = None
+        end_datetime = None
+        
+        if start_time:
+            try:
+                start_datetime = datetime.fromisoformat(start_time.replace(' ', 'T'))
+            except ValueError:
+                raise HTTPException(status_code=400, detail="开始时间格式错误，请使用 YYYY-MM-DD HH:MM:SS")
+        
+        if end_time:
+            try:
+                end_datetime = datetime.fromisoformat(end_time.replace(' ', 'T'))
+            except ValueError:
+                raise HTTPException(status_code=400, detail="结束时间格式错误，请使用 YYYY-MM-DD HH:MM:SS")
+        
+        # 调用服务层导出方法
+        csv_content = alert_service.export_alert_events_csv(
+            keyword=keyword,
+            service_type=service_type,
+            warning_level=warning_level,
+            event_type=event_type,
+            start_time=start_datetime,
+            end_time=end_datetime
+        )
+        
+        # 生成文件名（使用英文避免编码问题）
+        current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"alarm_events_export_{current_time}.csv"
+        
+        # 将CSV内容转换为字节流
+        csv_bytes = csv_content.encode('utf-8-sig')  # 使用UTF-8 BOM以支持中文Excel
+        
+        # 返回文件下载响应
+        return StreamingResponse(
+            io.BytesIO(csv_bytes),
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}",
+                "Cache-Control": "no-cache",
+                "Content-Length": str(len(csv_bytes))
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"导出告警事件失败: {e}")
+        raise HTTPException(status_code=500, detail=f"导出失败: {str(e)}")
 
 
 @app.get("/alarmApi/alert-statistics")

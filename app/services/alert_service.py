@@ -5,6 +5,8 @@
 
 import logging
 import json
+import csv
+import io
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 
@@ -363,6 +365,107 @@ class AlertService:
                 "data": {"total": 0, "list": []}
             }
     
+    def export_alert_events_csv(self, keyword: str = "", warning_level: Optional[int] = None,
+                               service_type: str = "", event_type: str = "",
+                               start_time: Optional[datetime] = None, end_time: Optional[datetime] = None) -> str:
+        """导出告警事件历史为CSV格式"""
+        try:
+            conditions = []
+            params = []
+            
+            # 构建查询条件（与get_alert_events相同）
+            if keyword:
+                conditions.append("(rule_name LIKE ? OR CAST(channel_id AS TEXT) LIKE ? OR CAST(point_id AS TEXT) LIKE ?)")
+                keyword_pattern = f"%{keyword}%"
+                params.extend([keyword_pattern, keyword_pattern, keyword_pattern])
+            
+            if service_type:
+                conditions.append("service_type = ?")
+                params.append(service_type)
+            
+            if warning_level is not None and warning_level in [1, 2, 3]:
+                conditions.append("warning_level = ?")
+                params.append(warning_level)
+            
+            if event_type and event_type in ["trigger", "recovery"]:
+                conditions.append("event_type = ?")
+                params.append(event_type)
+            
+            if start_time:
+                conditions.append("triggered_at >= ?")
+                params.append(start_time.isoformat())
+            
+            if end_time:
+                conditions.append("triggered_at <= ?")
+                params.append(end_time.isoformat())
+            
+            where_clause = " AND ".join(conditions) if conditions else "1=1"
+            
+            # 查询所有符合条件的数据（无分页限制）
+            data_sql = f"""
+            SELECT * FROM alert_event WHERE {where_clause} 
+            ORDER BY triggered_at DESC
+            """
+            results = self.db_manager.execute_query(data_sql, tuple(params))
+            
+            # 创建CSV内容
+            output = io.StringIO()
+            writer = csv.writer(output)
+            
+            # 写入表头（英文，除规则名称外）
+            headers = [
+                'Event ID', 'Rule ID', 'Rule Name', 'Service Type', 'Channel ID', 
+                'Data Type', 'Point ID', 'Warning Level', 'Operator', 'Threshold',
+                'Trigger Value', 'Recovery Value', 'Event Type', 'Triggered At', 
+                'Recovered At', 'Duration (Seconds)'
+            ]
+            writer.writerow(headers)
+            
+            # 写入数据行
+            for row in results:
+                event = self._row_to_alert_event(row)
+                
+                # 格式化数据（保持原始格式）
+                warning_level_value = event.warning_level  # 保持数字 1/2/3
+                event_type_value = event.event_type  # 保持英文 trigger/recovery  
+                data_type_value = event.data_type  # 保持单字母 T/S/C/A
+                
+                # 时间格式化
+                triggered_at_str = event.triggered_at.strftime("%Y-%m-%d %H:%M:%S") if event.triggered_at else ""
+                recovered_at_str = event.recovered_at.strftime("%Y-%m-%d %H:%M:%S") if event.recovered_at else ""
+                
+                # 持续时间保持秒数
+                duration_value = event.duration if event.duration is not None else ""
+                
+                writer.writerow([
+                    event.id,
+                    event.rule_id,
+                    event.rule_name,  # 保持中文规则名称
+                    event.service_type,
+                    event.channel_id,
+                    data_type_value,  # T/S/C/A
+                    event.point_id,
+                    warning_level_value,  # 1/2/3
+                    event.operator,
+                    event.threshold_value,
+                    event.trigger_value,
+                    event.recovery_value if event.recovery_value is not None else "",
+                    event_type_value,  # trigger/recovery
+                    triggered_at_str,
+                    recovered_at_str,
+                    duration_value  # 移除备注列
+                ])
+            
+            csv_content = output.getvalue()
+            output.close()
+            
+            logger.info(f"成功导出 {len(results)} 条告警事件记录")
+            return csv_content
+            
+        except Exception as e:
+            logger.error(f"导出告警事件CSV失败: {e}")
+            raise e
+
     def get_alert_statistics(self) -> Dict[str, Any]:
         """获取告警统计信息"""
         try:
