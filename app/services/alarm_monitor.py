@@ -7,6 +7,7 @@ import asyncio
 import logging
 import redis
 import json
+import requests
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 from concurrent.futures import ThreadPoolExecutor
@@ -154,11 +155,15 @@ class AlarmMonitor:
                     alert_id = alert_service.create_alert(rule, current_value)
                     if alert_id:
                         logger.warning(f"触发告警: {rule.rule_name}, 当前值: {current_value}, 阈值: {rule.operator} {rule.value}")
+                        # 发送告警广播
+                        await self._send_alarm_broadcast(alert_id, rule, current_value)
             else:
                 if existing_alert:
                     # 告警恢复
                     if alert_service.resolve_alert(existing_alert.id, current_value):
                         logger.info(f"告警恢复: {rule.rule_name}, 当前值: {current_value}")
+                        # 发送恢复广播
+                        await self._send_alarm_recovery_broadcast(existing_alert.id, rule, current_value)
                 
         except Exception as e:
             logger.error(f"检查规则失败 {rule.rule_name}: {e}")
@@ -259,7 +264,7 @@ class AlarmMonitor:
                 "data": {}
             }
     
-    def on_rule_updated(self, rule_id: int):
+    async def on_rule_updated(self, rule_id: int):
         """规则更新时的回调处理"""
         try:
             rule = alert_rule_service.get_rule_by_id(rule_id)
@@ -269,25 +274,145 @@ class AlarmMonitor:
             existing_alert = alert_service.get_alert_by_rule_id(rule_id)
             
             if not rule.enabled and existing_alert:
-                # 规则被禁用，解除现有告警
-                alert_service.resolve_alerts_by_rule_id(rule_id)
+                # 规则被禁用，解除现有告警并发送恢复广播
+                resolved_alerts = alert_service.resolve_alerts_by_rule_id(rule_id)
                 logger.info(f"规则被禁用，解除相关告警: {rule.rule_name}")
+                
+                # 为每个解除的告警发送恢复广播
+                for alert in resolved_alerts:
+                    await self._send_alarm_recovery_broadcast(
+                        alert.id, rule, None, reason="规则被禁用"
+                    )
             
             logger.info(f"规则更新处理完成: {rule.rule_name}")
             
         except Exception as e:
             logger.error(f"处理规则更新失败: {e}")
     
-    def on_rule_deleted(self, rule_id: int):
+    async def on_rule_deleted(self, rule_id: int):
         """规则删除时的回调处理"""
         try:
+            # 先获取规则信息（删除前）
+            rule = alert_rule_service.get_rule_by_id(rule_id)
+            if not rule:
+                logger.warning(f"规则ID {rule_id} 不存在")
+                return
+                
             # 解除该规则的所有告警
-            count = alert_service.resolve_alerts_by_rule_id(rule_id)
-            logger.info(f"规则删除，解除了 {count} 条相关告警")
+            resolved_alerts = alert_service.resolve_alerts_by_rule_id(rule_id)
+            logger.info(f"规则删除，解除了 {len(resolved_alerts)} 条相关告警")
+            
+            # 为每个解除的告警发送恢复广播
+            for alert in resolved_alerts:
+                await self._send_alarm_recovery_broadcast(
+                    alert.id, rule, None, reason="规则被删除"
+                )
             
         except Exception as e:
             logger.error(f"处理规则删除失败: {e}")
     
+    async def _send_alarm_broadcast(self, alert_id: int, rule: AlertRule, current_value: float):
+        """发送告警广播消息到6005端口"""
+        try:
+            # 构建广播消息
+            broadcast_data = {
+                "type": "alarm",
+                "id": f"alarm_{alert_id:03d}",
+                "timestamp": datetime.now().isoformat() + "Z",
+                "data": {
+                    "alarm_id": str(alert_id),
+                    "service_type": rule.service_type,
+                    "channel_id": rule.channel_id,
+                    "data_type": rule.data_type,  # 添加数据类型: T(温度), S(状态), C(通信), A(模拟量)
+                    "point_id": rule.point_id,
+                    "status": 1,  # 1表示触发状态
+                    "level": rule.warning_level,
+                    "value": current_value,
+                    "message": f"{rule.rule_name}: {current_value} {rule.operator} {rule.value}"
+                }
+            }
+            
+            # 异步发送HTTP请求
+            broadcast_url = "http://localhost:6005/api/v1/broadcast"
+            loop = asyncio.get_event_loop()
+            
+            def send_request():
+                try:
+                    response = requests.post(
+                        broadcast_url,
+                        json=broadcast_data,
+                        timeout=3  # 3秒超时
+                    )
+                    return response.status_code == 200, response.text
+                except Exception as e:
+                    return False, str(e)
+            
+            # 在线程池中执行HTTP请求，避免阻塞
+            success, result = await loop.run_in_executor(self.executor, send_request)
+            
+            if success:
+                logger.info(f"告警广播发送成功: 规则={rule.rule_name}, 告警ID={alert_id}")
+            else:
+                logger.warning(f"告警广播发送失败: 规则={rule.rule_name}, 告警ID={alert_id}, 错误={result}")
+                
+        except Exception as e:
+            logger.error(f"发送告警广播异常: 规则={rule.rule_name}, 告警ID={alert_id}, 异常={e}")
+    
+    async def _send_alarm_recovery_broadcast(self, alert_id: int, rule: AlertRule, recovery_value: Optional[float], reason: str = "条件恢复"):
+        """发送告警恢复广播消息到6005端口"""
+        try:
+            # 构建恢复消息
+            if recovery_value is not None:
+                message = f"{rule.rule_name}已恢复: {recovery_value} (不再满足 {rule.operator} {rule.value})"
+                value = recovery_value
+            else:
+                message = f"{rule.rule_name}已恢复: {reason}"
+                value = 0.0  # 规则删除/禁用时使用默认值
+            
+            # 构建恢复广播消息
+            broadcast_data = {
+                "type": "alarm",
+                "id": f"alarm_{alert_id:03d}_recovery",
+                "timestamp": datetime.now().isoformat() + "Z",
+                "data": {
+                    "alarm_id": str(alert_id),
+                    "service_type": rule.service_type,
+                    "channel_id": rule.channel_id,
+                    "data_type": rule.data_type,
+                    "point_id": rule.point_id,
+                    "status": 0,  # 0表示恢复状态
+                    "level": rule.warning_level,
+                    "value": value,
+                    "message": message
+                }
+            }
+            
+            # 异步发送HTTP请求
+            broadcast_url = "http://localhost:6005/api/v1/broadcast"
+            loop = asyncio.get_event_loop()
+            
+            def send_request():
+                try:
+                    response = requests.post(
+                        broadcast_url,
+                        json=broadcast_data,
+                        timeout=3  # 3秒超时
+                    )
+                    return response.status_code == 200, response.text
+                except Exception as e:
+                    return False, str(e)
+            
+            # 在线程池中执行HTTP请求，避免阻塞
+            success, result = await loop.run_in_executor(self.executor, send_request)
+            
+            if success:
+                logger.info(f"告警恢复广播发送成功: 规则={rule.rule_name}, 告警ID={alert_id}")
+            else:
+                logger.warning(f"告警恢复广播发送失败: 规则={rule.rule_name}, 告警ID={alert_id}, 错误={result}")
+                
+        except Exception as e:
+            logger.error(f"发送告警恢复广播异常: 规则={rule.rule_name}, 告警ID={alert_id}, 异常={e}")
+
     def get_monitor_status(self) -> Dict[str, Any]:
         """获取监控状态"""
         try:

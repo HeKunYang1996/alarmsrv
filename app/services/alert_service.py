@@ -238,14 +238,14 @@ class AlertService:
             logger.error(f"解除告警失败: {e}")
             return False
     
-    def resolve_alerts_by_rule_id(self, rule_id: int) -> int:
+    def resolve_alerts_by_rule_id(self, rule_id: int) -> List[Alert]:
         """根据规则ID解除所有相关告警（规则被禁用/删除时使用）"""
+        resolved_alerts = []
         try:
             # 获取相关的告警
             sql = "SELECT * FROM alert WHERE rule_id = ?"
             results = self.db_manager.execute_query(sql, (rule_id,))
             
-            resolved_count = 0
             for row in results:
                 alert = self._row_to_alert(row)
                 # 创建事件记录（规则变更触发的解除）
@@ -256,14 +256,14 @@ class AlertService:
                     # 删除告警记录
                     delete_sql = "DELETE FROM alert WHERE id = ?"
                     if self.db_manager.execute_delete(delete_sql, (alert.id,)):
-                        resolved_count += 1
+                        resolved_alerts.append(alert)
             
-            logger.info(f"规则ID {rule_id} 相关的 {resolved_count} 条告警已解除")
-            return resolved_count
+            logger.info(f"规则ID {rule_id} 相关的 {len(resolved_alerts)} 条告警已解除")
+            return resolved_alerts
             
         except Exception as e:
             logger.error(f"批量解除告警失败: {e}")
-            return 0
+            return []
     
     # ==================== AlertEvent CRUD ====================
     

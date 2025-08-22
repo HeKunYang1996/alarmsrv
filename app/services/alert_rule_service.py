@@ -268,7 +268,7 @@ class AlertRuleService:
             # 查询数据
             data_sql = f"""
             SELECT * FROM alert_rule WHERE {where_clause} 
-            ORDER BY created_at DESC 
+            ORDER BY id ASC 
             LIMIT ? OFFSET ?
             """
             data_params = list(params) + [page_size, offset]
@@ -329,7 +329,7 @@ class AlertRuleService:
             total = count_result[0][0] if count_result else 0
             
             # 查询数据
-            data_sql = "SELECT * FROM alert_rule ORDER BY created_at DESC LIMIT ? OFFSET ?"
+            data_sql = "SELECT * FROM alert_rule ORDER BY id ASC LIMIT ? OFFSET ?"
             results = self.db_manager.execute_query(data_sql, (page_size, offset))
             
             rules = [self._row_to_alert_rule(row) for row in results]

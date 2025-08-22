@@ -6,6 +6,7 @@
 import logging
 import sys
 import os
+import asyncio
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
@@ -413,7 +414,7 @@ async def update_alert_rule(rule_id: int, rule_data: dict):
         success = alert_rule_service.update_rule(rule)
         if success:
             # 通知监控引擎规则已更新
-            alarm_monitor.on_rule_updated(rule_id)
+            asyncio.create_task(alarm_monitor.on_rule_updated(rule_id))
             return {
                 "success": True,
                 "message": "告警规则更新成功",
@@ -440,7 +441,7 @@ async def delete_alert_rule(rule_id: int):
     """删除告警规则"""
     try:
         # 先通知监控引擎处理相关告警
-        alarm_monitor.on_rule_deleted(rule_id)
+        await alarm_monitor.on_rule_deleted(rule_id)
         
         success = alert_rule_service.delete_rule(rule_id)
         if success:
@@ -472,7 +473,7 @@ async def enable_alert_rule(rule_id: int):
         success = alert_rule_service.enable_rule(rule_id)
         if success:
             # 通知监控引擎规则已启用
-            alarm_monitor.on_rule_updated(rule_id)
+            asyncio.create_task(alarm_monitor.on_rule_updated(rule_id))
             return {
                 "success": True,
                 "message": "告警规则启用成功",
@@ -501,7 +502,7 @@ async def disable_alert_rule(rule_id: int):
         success = alert_rule_service.disable_rule(rule_id)
         if success:
             # 通知监控引擎规则已禁用（将解除相关告警）
-            alarm_monitor.on_rule_updated(rule_id)
+            asyncio.create_task(alarm_monitor.on_rule_updated(rule_id))
             return {
                 "success": True,
                 "message": "告警规则禁用成功",
