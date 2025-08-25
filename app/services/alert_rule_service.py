@@ -26,9 +26,10 @@ class AlertRuleService:
                 logger.error("规则验证失败")
                 return None
             
-            # 设置创建时间
-            rule.created_at = datetime.now()
-            rule.updated_at = rule.created_at
+            # 设置创建时间（使用时间戳）
+            now = int(datetime.now().timestamp())
+            rule.created_at = now
+            rule.updated_at = now
             
             sql = """
             INSERT INTO alert_rule (
@@ -249,11 +250,11 @@ class AlertRuleService:
             # 时间范围过滤
             if start_time:
                 conditions.append("created_at >= ?")
-                params.append(start_time.isoformat())
+                params.append(int(start_time.timestamp()))
             
             if end_time:
                 conditions.append("created_at <= ?")
-                params.append(end_time.isoformat())
+                params.append(int(end_time.timestamp()))
             
             where_clause = " AND ".join(conditions) if conditions else "1=1"
             
@@ -371,8 +372,8 @@ class AlertRuleService:
             value=row["value"],
             enabled=bool(row["enabled"]),
             description=row["description"] or "",
-            created_at=datetime.fromisoformat(row["created_at"]) if row["created_at"] else None,
-            updated_at=datetime.fromisoformat(row["updated_at"]) if row["updated_at"] else None,
+            created_at=row["created_at"],  # 直接使用时间戳
+            updated_at=row["updated_at"],  # 直接使用时间戳
         )
 
 

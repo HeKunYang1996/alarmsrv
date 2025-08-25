@@ -59,8 +59,8 @@ class AlertRule:
     value: float = 0.0
     enabled: bool = True
     description: str = ""
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    created_at: Optional[int] = None  # 时间戳（秒）
+    updated_at: Optional[int] = None  # 时间戳（秒）
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典格式"""
@@ -76,8 +76,8 @@ class AlertRule:
             "value": self.value,
             "enabled": self.enabled,
             "description": self.description,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "created_at": self.timestamp_to_isoformat(self.created_at),
+            "updated_at": self.timestamp_to_isoformat(self.updated_at),
         }
 
     @classmethod
@@ -95,9 +95,31 @@ class AlertRule:
             value=data.get("value", 0.0),
             enabled=data.get("enabled", True),
             description=data.get("description", ""),
-            created_at=datetime.fromisoformat(data["created_at"]) if data.get("created_at") else None,
-            updated_at=datetime.fromisoformat(data["updated_at"]) if data.get("updated_at") else None,
+            created_at=cls.isoformat_to_timestamp(data.get("created_at")),
+            updated_at=cls.isoformat_to_timestamp(data.get("updated_at")),
         )
+    
+    @staticmethod
+    def timestamp_to_isoformat(timestamp: Optional[int]) -> Optional[str]:
+        """将时间戳转换为ISO格式字符串"""
+        if timestamp is None:
+            return None
+        return datetime.fromtimestamp(timestamp).isoformat()
+    
+    @staticmethod
+    def isoformat_to_timestamp(iso_string: Optional[str]) -> Optional[int]:
+        """将ISO格式字符串转换为时间戳"""
+        if iso_string is None:
+            return None
+        try:
+            # 支持多种时间格式
+            if 'T' in iso_string:
+                dt = datetime.fromisoformat(iso_string)
+            else:
+                dt = datetime.fromisoformat(iso_string.replace(' ', 'T'))
+            return int(dt.timestamp())
+        except ValueError:
+            return None
 
     def redis_key(self) -> str:
         """生成对应的Redis键"""

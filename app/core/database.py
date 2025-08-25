@@ -102,7 +102,7 @@ class DatabaseManager:
                 threshold_value REAL NOT NULL,
                 current_value REAL NOT NULL,
                 status TEXT NOT NULL DEFAULT 'active',
-                triggered_at TIMESTAMP NOT NULL,
+                triggered_at INTEGER NOT NULL,
                 UNIQUE(rule_id),
                 FOREIGN KEY (rule_id) REFERENCES alert_rule (id) ON DELETE CASCADE
             );
@@ -127,8 +127,8 @@ class DatabaseManager:
                 trigger_value REAL NOT NULL,
                 recovery_value REAL,
                 event_type TEXT NOT NULL CHECK(event_type IN ('trigger', 'recovery')),
-                triggered_at TIMESTAMP NOT NULL,
-                recovered_at TIMESTAMP,
+                triggered_at INTEGER NOT NULL,
+                recovered_at INTEGER,
                 duration INTEGER,
                 FOREIGN KEY (rule_id) REFERENCES alert_rule (id) ON DELETE CASCADE
             );
@@ -150,8 +150,8 @@ class DatabaseManager:
                 value REAL NOT NULL,
                 enabled BOOLEAN NOT NULL DEFAULT 1,
                 description TEXT DEFAULT '',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                created_at INTEGER DEFAULT (strftime('%s', 'now')),
+                updated_at INTEGER DEFAULT (strftime('%s', 'now')),
                 UNIQUE(service_type, channel_id, data_type, point_id, rule_name)
             );
             """
@@ -179,36 +179,30 @@ class DatabaseManager:
                 # alert_event表索引
                 "CREATE INDEX IF NOT EXISTS idx_alert_event_rule_id ON alert_event(rule_id);",
                 "CREATE INDEX IF NOT EXISTS idx_alert_event_service_channel ON alert_event(service_type, channel_id);",
+                "CREATE INDEX IF NOT EXISTS idx_alert_event_event_type ON alert_event(event_type);",
                 "CREATE INDEX IF NOT EXISTS idx_alert_event_warning_level ON alert_event(warning_level);",
                 "CREATE INDEX IF NOT EXISTS idx_alert_event_triggered_at ON alert_event(triggered_at);",
                 "CREATE INDEX IF NOT EXISTS idx_alert_event_recovered_at ON alert_event(recovered_at);",
-                "CREATE INDEX IF NOT EXISTS idx_alert_event_event_type ON alert_event(event_type);",
+                "CREATE INDEX IF NOT EXISTS idx_alert_event_rule_name ON alert_event(rule_name);"
             ]
             
             for index_sql in indexes:
                 conn.execute(index_sql)
             
-            # 创建更新时间触发器
-            triggers = [
-                # alert_rule表触发器
-                """
-                CREATE TRIGGER IF NOT EXISTS update_alert_rule_timestamp 
-                AFTER UPDATE ON alert_rule
-                FOR EACH ROW
-                BEGIN
-                    UPDATE alert_rule SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
-                END;
-                """,
-            ]
+            # 创建触发器以自动更新updated_at字段
+            trigger_sql = """
+            CREATE TRIGGER IF NOT EXISTS update_alert_rule_timestamp 
+            AFTER UPDATE ON alert_rule
+            BEGIN
+                UPDATE alert_rule SET updated_at = strftime('%s', 'now') WHERE id = NEW.id;
+            END;
+            """
+            conn.execute(trigger_sql)
             
-            for trigger_sql in triggers:
-                conn.execute(trigger_sql)
-            
-            conn.commit()
-            logger.info("数据表创建完成")
+            logger.info("数据库表结构创建完成")
             
         except Exception as e:
-            logger.error(f"创建表失败: {e}")
+            logger.error(f"创建表结构失败: {e}")
             raise
     
     @contextmanager

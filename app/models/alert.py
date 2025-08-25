@@ -18,13 +18,13 @@ class AlertStatus(Enum):
 
 class EventType(Enum):
     """事件类型枚举"""
-    TRIGGER = "trigger"    # 触发
-    RECOVERY = "recovery"  # 恢复
+    TRIGGER = "trigger"
+    RECOVERY = "recovery"
 
 
 @dataclass
 class Alert:
-    """当前告警数据类"""
+    """告警数据类"""
     id: Optional[int] = None
     rule_id: int = None
     rule_snapshot: str = ""  # JSON格式的规则快照
@@ -38,7 +38,7 @@ class Alert:
     threshold_value: float = 0.0
     current_value: float = 0.0
     status: str = "active"
-    triggered_at: Optional[datetime] = None  # 告警触发时间
+    triggered_at: Optional[int] = None  # 时间戳（秒）
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典格式"""
@@ -56,7 +56,7 @@ class Alert:
             "threshold_value": self.threshold_value,
             "current_value": self.current_value,
             "status": self.status,
-            "triggered_at": self.triggered_at.isoformat() if self.triggered_at else None,
+            "triggered_at": self.timestamp_to_isoformat(self.triggered_at),
         }
     
     @classmethod
@@ -65,7 +65,7 @@ class Alert:
         return cls(
             id=data.get("id"),
             rule_id=data.get("rule_id"),
-            rule_snapshot=json.dumps(data.get("rule_snapshot", {})) if data.get("rule_snapshot") else "",
+            rule_snapshot=data.get("rule_snapshot", "{}"),
             service_type=data.get("service_type", ""),
             channel_id=data.get("channel_id"),
             data_type=data.get("data_type", ""),
@@ -76,17 +76,35 @@ class Alert:
             threshold_value=data.get("threshold_value", 0.0),
             current_value=data.get("current_value", 0.0),
             status=data.get("status", "active"),
-            triggered_at=datetime.fromisoformat(data["triggered_at"]) if data.get("triggered_at") else None,
+            triggered_at=cls.isoformat_to_timestamp(data.get("triggered_at")),
         )
     
-    def redis_key(self) -> str:
-        """生成对应的Redis键"""
-        return f"{self.service_type}:{self.channel_id}:{self.data_type}"
+    @staticmethod
+    def timestamp_to_isoformat(timestamp: Optional[int]) -> Optional[str]:
+        """将时间戳转换为ISO格式字符串"""
+        if timestamp is None:
+            return None
+        return datetime.fromtimestamp(timestamp).isoformat()
+    
+    @staticmethod
+    def isoformat_to_timestamp(iso_string: Optional[str]) -> Optional[int]:
+        """将ISO格式字符串转换为时间戳"""
+        if iso_string is None:
+            return None
+        try:
+            # 支持多种时间格式
+            if 'T' in iso_string:
+                dt = datetime.fromisoformat(iso_string)
+            else:
+                dt = datetime.fromisoformat(iso_string.replace(' ', 'T'))
+            return int(dt.timestamp())
+        except ValueError:
+            return None
     
     def duration_seconds(self) -> Optional[int]:
         """计算告警持续时间（秒）"""
         if self.triggered_at:
-            return int((datetime.now() - self.triggered_at).total_seconds())
+            return int((datetime.now().timestamp() - self.triggered_at))
         return None
 
 
@@ -107,8 +125,8 @@ class AlertEvent:
     trigger_value: float = 0.0
     recovery_value: Optional[float] = None
     event_type: str = "trigger"  # trigger/recovery
-    triggered_at: Optional[datetime] = None  # 告警触发时间
-    recovered_at: Optional[datetime] = None  # 告警结束时间
+    triggered_at: Optional[int] = None  # 告警触发时间戳（秒）
+    recovered_at: Optional[int] = None  # 告警结束时间戳（秒）
     duration: Optional[int] = None           # 持续时间（秒）
     
     def to_dict(self) -> Dict[str, Any]:
@@ -128,8 +146,8 @@ class AlertEvent:
             "trigger_value": self.trigger_value,
             "recovery_value": self.recovery_value,
             "event_type": self.event_type,
-            "triggered_at": self.triggered_at.isoformat() if self.triggered_at else None,
-            "recovered_at": self.recovered_at.isoformat() if self.recovered_at else None,
+            "triggered_at": self.timestamp_to_isoformat(self.triggered_at),
+            "recovered_at": self.timestamp_to_isoformat(self.recovered_at),
             "duration": self.duration,
         }
     
@@ -139,7 +157,7 @@ class AlertEvent:
         return cls(
             id=data.get("id"),
             rule_id=data.get("rule_id"),
-            rule_snapshot=json.dumps(data.get("rule_snapshot", {})) if data.get("rule_snapshot") else "",
+            rule_snapshot=data.get("rule_snapshot", "{}"),
             service_type=data.get("service_type", ""),
             channel_id=data.get("channel_id"),
             data_type=data.get("data_type", ""),
@@ -151,16 +169,42 @@ class AlertEvent:
             trigger_value=data.get("trigger_value", 0.0),
             recovery_value=data.get("recovery_value"),
             event_type=data.get("event_type", "trigger"),
-            triggered_at=datetime.fromisoformat(data["triggered_at"]) if data.get("triggered_at") else None,
-            recovered_at=datetime.fromisoformat(data["recovered_at"]) if data.get("recovered_at") else None,
+            triggered_at=cls.isoformat_to_timestamp(data.get("triggered_at")),
+            recovered_at=cls.isoformat_to_timestamp(data.get("recovered_at")),
             duration=data.get("duration"),
         )
     
+    @staticmethod
+    def timestamp_to_isoformat(timestamp: Optional[int]) -> Optional[str]:
+        """将时间戳转换为ISO格式字符串"""
+        if timestamp is None:
+            return None
+        return datetime.fromtimestamp(timestamp).isoformat()
+    
+    @staticmethod
+    def isoformat_to_timestamp(iso_string: Optional[str]) -> Optional[int]:
+        """将ISO格式字符串转换为时间戳"""
+        if iso_string is None:
+            return None
+        try:
+            # 支持多种时间格式
+            if 'T' in iso_string:
+                dt = datetime.fromisoformat(iso_string)
+            else:
+                dt = datetime.fromisoformat(iso_string.replace(' ', 'T'))
+            return int(dt.timestamp())
+        except ValueError:
+            return None
+    
     @classmethod
-    def from_alert(cls, alert: Alert, event_type: str = "recovery", recovery_value: Optional[float] = None) -> "AlertEvent":
+    def from_alert(cls, alert: "Alert", event_type: str, recovery_value: Optional[float] = None) -> "AlertEvent":
         """从Alert对象创建AlertEvent"""
-        now = datetime.now()
-        duration = alert.duration_seconds() if alert.triggered_at else None
+        now = int(datetime.now().timestamp())
+        
+        # 计算持续时间
+        duration = None
+        if alert.triggered_at:
+            duration = int(now - alert.triggered_at)
         
         return cls(
             rule_id=alert.rule_id,
@@ -178,5 +222,5 @@ class AlertEvent:
             event_type=event_type,
             triggered_at=alert.triggered_at,
             recovered_at=now if event_type == "recovery" else None,
-            duration=duration,
+            duration=duration
         )

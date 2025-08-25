@@ -34,7 +34,7 @@ class AlertService:
                 logger.warning(f"规则ID {rule.id} 的告警已存在，不重复创建")
                 return existing.id
             
-            now = datetime.now()
+            now = int(datetime.now().timestamp())
             
             # 创建规则快照
             rule_snapshot = json.dumps({
@@ -155,11 +155,11 @@ class AlertService:
             
             if start_time:
                 conditions.append("triggered_at >= ?")
-                params.append(start_time.isoformat())
+                params.append(int(start_time.timestamp()))
             
             if end_time:
                 conditions.append("triggered_at <= ?")
-                params.append(end_time.isoformat())
+                params.append(int(end_time.timestamp()))
             
             where_clause = " AND ".join(conditions)
             offset = (page - 1) * page_size
@@ -323,11 +323,11 @@ class AlertService:
             
             if start_time:
                 conditions.append("triggered_at >= ?")
-                params.append(start_time.isoformat())
+                params.append(int(start_time.timestamp()))
             
             if end_time:
                 conditions.append("triggered_at <= ?")
-                params.append(end_time.isoformat())
+                params.append(int(end_time.timestamp()))
             
             where_clause = " AND ".join(conditions) if conditions else "1=1"
             offset = (page - 1) * page_size
@@ -393,11 +393,11 @@ class AlertService:
             
             if start_time:
                 conditions.append("triggered_at >= ?")
-                params.append(start_time.isoformat())
+                params.append(int(start_time.timestamp()))
             
             if end_time:
                 conditions.append("triggered_at <= ?")
-                params.append(end_time.isoformat())
+                params.append(int(end_time.timestamp()))
             
             where_clause = " AND ".join(conditions) if conditions else "1=1"
             
@@ -431,8 +431,8 @@ class AlertService:
                 data_type_value = event.data_type  # 保持单字母 T/S/C/A
                 
                 # 时间格式化
-                triggered_at_str = event.triggered_at.strftime("%Y-%m-%d %H:%M:%S") if event.triggered_at else ""
-                recovered_at_str = event.recovered_at.strftime("%Y-%m-%d %H:%M:%S") if event.recovered_at else ""
+                triggered_at_str = datetime.fromtimestamp(event.triggered_at).strftime("%Y-%m-%d %H:%M:%S") if event.triggered_at else ""
+                recovered_at_str = datetime.fromtimestamp(event.recovered_at).strftime("%Y-%m-%d %H:%M:%S") if event.recovered_at else ""
                 
                 # 持续时间保持秒数
                 duration_value = event.duration if event.duration is not None else ""
@@ -528,7 +528,7 @@ class AlertService:
             threshold_value=row["threshold_value"],
             current_value=row["current_value"],
             status=row["status"],
-            triggered_at=datetime.fromisoformat(row["triggered_at"]) if row["triggered_at"] else None,
+            triggered_at=row["triggered_at"],  # 直接使用时间戳
         )
     
     def _row_to_alert_event(self, row) -> AlertEvent:
@@ -548,8 +548,8 @@ class AlertService:
             trigger_value=row["trigger_value"],
             recovery_value=row["recovery_value"],
             event_type=row["event_type"],
-            triggered_at=datetime.fromisoformat(row["triggered_at"]) if row["triggered_at"] else None,
-            recovered_at=datetime.fromisoformat(row["recovered_at"]) if row["recovered_at"] else None,
+            triggered_at=row["triggered_at"],  # 直接使用时间戳
+            recovered_at=row["recovered_at"],  # 直接使用时间戳
             duration=row["duration"],
         )
 

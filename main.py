@@ -222,7 +222,7 @@ async def create_alert_rule(rule_data: dict):
                     "existing_rule": {
                         "id": existing_rule.id,
                         "rule_name": existing_rule.rule_name,
-                        "created_at": existing_rule.created_at.isoformat() if existing_rule.created_at else None
+                        "created_at": AlertRule.timestamp_to_isoformat(existing_rule.created_at) if existing_rule.created_at else None
                     },
                     "suggestion": f"请更换其他点位或修改现有规则 ID:{existing_rule.id}"
                 }
@@ -311,36 +311,32 @@ async def list_alert_rules(
     service_type: str = Query("", description="服务类型过滤：comsrv, rulesrv, modsrv等"),
     warning_level: Optional[int] = Query(None, description="告警级别过滤：1=低级, 2=中级, 3=高级"),
     enabled: Optional[bool] = Query(None, description="启用状态过滤"),
-    start_time: Optional[str] = Query(None, description="开始时间，格式：YYYY-MM-DD HH:MM:SS"),
-    end_time: Optional[str] = Query(None, description="结束时间，格式：YYYY-MM-DD HH:MM:SS"),
+    start_time: Optional[str] = Query(None, description="开始时间，支持多种格式：2025-08-21、2025-08-21 00:00:00、2025-08-21T00:00:00等"),
+    end_time: Optional[str] = Query(None, description="结束时间，支持多种格式：2025-08-21、2025-08-21 23:59:59、2025-08-21T23:59:59等"),
     page: int = Query(1, ge=1, description="页码，从1开始"),
     page_size: int = Query(10, ge=1, le=100, description="每页大小，最大100")
 ):
     """高级搜索告警规则列表"""
     try:
-        # 时间参数转换
-        start_datetime = None
-        end_datetime = None
+        # 使用增强的时间解析器
+        from app.utils.time_parser import parse_time_range
         
-        if start_time:
-            try:
-                start_datetime = datetime.fromisoformat(start_time.replace(' ', 'T'))
-            except ValueError:
-                return {
-                    "success": False,
-                    "message": "开始时间格式错误，请使用：YYYY-MM-DD HH:MM:SS",
-                    "data": {"total": 0, "list": []}
-                }
+        start_datetime, end_datetime = parse_time_range(start_time, end_time)
         
-        if end_time:
-            try:
-                end_datetime = datetime.fromisoformat(end_time.replace(' ', 'T'))
-            except ValueError:
-                return {
-                    "success": False,
-                    "message": "结束时间格式错误，请使用：YYYY-MM-DD HH:MM:SS",
-                    "data": {"total": 0, "list": []}
-                }
+        # 如果时间解析失败，返回错误信息
+        if start_time and not start_datetime:
+            return {
+                "success": False,
+                "message": f"开始时间格式错误: {start_time}，支持格式：2025-08-21、2025-08-21 00:00:00、2025-08-21T00:00:00等",
+                "data": {"total": 0, "list": []}
+            }
+        
+        if end_time and not end_datetime:
+            return {
+                "success": False,
+                "message": f"结束时间格式错误: {end_time}，支持格式：2025-08-21、2025-08-21 23:59:59、2025-08-21T23:59:59等",
+                "data": {"total": 0, "list": []}
+            }
         
         # 执行搜索
         result = alert_rule_service.search_rules(
@@ -533,36 +529,32 @@ async def list_alerts(
     keyword: str = Query("", description="关键词搜索，支持规则名称、通道ID、点位ID"),
     service_type: str = Query("", description="服务类型过滤"),
     warning_level: Optional[int] = Query(None, description="告警级别过滤"),
-    start_time: Optional[str] = Query(None, description="开始时间"),
-    end_time: Optional[str] = Query(None, description="结束时间"),
+    start_time: Optional[str] = Query(None, description="开始时间，支持多种格式：2025-08-21、2025-08-21 00:00:00、2025-08-21T00:00:00等"),
+    end_time: Optional[str] = Query(None, description="结束时间，支持多种格式：2025-08-21、2025-08-21 23:59:59、2025-08-21T23:59:59等"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(10, ge=1, le=100, description="每页大小")
 ):
     """获取当前告警列表"""
     try:
-        # 时间参数转换
-        start_datetime = None
-        end_datetime = None
+        # 使用增强的时间解析器
+        from app.utils.time_parser import parse_time_range
         
-        if start_time:
-            try:
-                start_datetime = datetime.fromisoformat(start_time.replace(' ', 'T'))
-            except ValueError:
-                return {
-                    "success": False,
-                    "message": "开始时间格式错误",
-                    "data": {"total": 0, "list": []}
-                }
+        start_datetime, end_datetime = parse_time_range(start_time, end_time)
         
-        if end_time:
-            try:
-                end_datetime = datetime.fromisoformat(end_time.replace(' ', 'T'))
-            except ValueError:
-                return {
-                    "success": False,
-                    "message": "结束时间格式错误",
-                    "data": {"total": 0, "list": []}
-                }
+        # 如果时间解析失败，返回错误信息
+        if start_time and not start_datetime:
+            return {
+                "success": False,
+                "message": f"开始时间格式错误: {start_time}，支持格式：2025-08-21、2025-08-21 00:00:00、2025-08-21T00:00:00等",
+                "data": {"total": 0, "list": []}
+            }
+        
+        if end_time and not end_datetime:
+            return {
+                "success": False,
+                "message": f"结束时间格式错误: {end_time}，支持格式：2025-08-21、2025-08-21 23:59:59、2025-08-21T23:59:59等",
+                "data": {"total": 0, "list": []}
+            }
         
         # 执行搜索
         result = alert_service.search_alerts(
@@ -651,36 +643,32 @@ async def list_alert_events(
     service_type: str = Query("", description="服务类型过滤"),
     warning_level: Optional[int] = Query(None, description="告警级别过滤"),
     event_type: str = Query("", description="事件类型：trigger/recovery"),
-    start_time: Optional[str] = Query(None, description="开始时间"),
-    end_time: Optional[str] = Query(None, description="结束时间"),
+    start_time: Optional[str] = Query(None, description="开始时间，支持多种格式：2025-08-21、2025-08-21 00:00:00、2025-08-21T00:00:00等"),
+    end_time: Optional[str] = Query(None, description="结束时间，支持多种格式：2025-08-21、2025-08-21 23:59:59、2025-08-21T23:59:59等"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(10, ge=1, le=100, description="每页大小")
 ):
     """获取告警事件历史"""
     try:
-        # 时间参数转换
-        start_datetime = None
-        end_datetime = None
+        # 使用增强的时间解析器
+        from app.utils.time_parser import parse_time_range
         
-        if start_time:
-            try:
-                start_datetime = datetime.fromisoformat(start_time.replace(' ', 'T'))
-            except ValueError:
-                return {
-                    "success": False,
-                    "message": "开始时间格式错误",
-                    "data": {"total": 0, "list": []}
-                }
+        start_datetime, end_datetime = parse_time_range(start_time, end_time)
         
-        if end_time:
-            try:
-                end_datetime = datetime.fromisoformat(end_time.replace(' ', 'T'))
-            except ValueError:
-                return {
-                    "success": False,
-                    "message": "结束时间格式错误",
-                    "data": {"total": 0, "list": []}
-                }
+        # 如果时间解析失败，返回错误信息
+        if start_time and not start_datetime:
+            return {
+                "success": False,
+                "message": f"开始时间格式错误: {start_time}，支持格式：2025-08-21、2025-08-21 00:00:00、2025-08-21T00:00:00等",
+                "data": {"total": 0, "list": []}
+            }
+        
+        if end_time and not end_datetime:
+            return {
+                "success": False,
+                "message": f"结束时间格式错误: {end_time}，支持格式：2025-08-21、2025-08-21 23:59:59、2025-08-21T23:59:59等",
+                "data": {"total": 0, "list": []}
+            }
         
         # 执行查询
         result = alert_service.get_alert_events(
@@ -711,26 +699,22 @@ async def export_alert_events(
     service_type: str = Query("", description="服务类型过滤：comsrv, rulesrv, modsrv等"),
     warning_level: Optional[int] = Query(None, description="告警级别过滤：1=一般, 2=重要, 3=紧急"),
     event_type: str = Query("", description="事件类型过滤：trigger=触发, recovery=恢复"),
-    start_time: Optional[str] = Query(None, description="开始时间，格式：YYYY-MM-DD HH:MM:SS"),
-    end_time: Optional[str] = Query(None, description="结束时间，格式：YYYY-MM-DD HH:MM:SS")
+    start_time: Optional[str] = Query(None, description="开始时间，支持多种格式：2025-08-21、2025-08-21 00:00:00、2025-08-21T00:00:00等"),
+    end_time: Optional[str] = Query(None, description="结束时间，支持多种格式：2025-08-21、2025-08-21 23:59:59、2025-08-21T23:59:59等")
 ):
     """导出告警事件历史为CSV文件"""
     try:
-        # 时间参数转换
-        start_datetime = None
-        end_datetime = None
+        # 使用增强的时间解析器
+        from app.utils.time_parser import parse_time_range
         
-        if start_time:
-            try:
-                start_datetime = datetime.fromisoformat(start_time.replace(' ', 'T'))
-            except ValueError:
-                raise HTTPException(status_code=400, detail="开始时间格式错误，请使用 YYYY-MM-DD HH:MM:SS")
+        start_datetime, end_datetime = parse_time_range(start_time, end_time)
         
-        if end_time:
-            try:
-                end_datetime = datetime.fromisoformat(end_time.replace(' ', 'T'))
-            except ValueError:
-                raise HTTPException(status_code=400, detail="结束时间格式错误，请使用 YYYY-MM-DD HH:MM:SS")
+        # 如果时间解析失败，返回错误信息
+        if start_time and not start_datetime:
+            raise HTTPException(status_code=400, detail=f"开始时间格式错误: {start_time}，支持格式：2025-08-21、2025-08-21 00:00:00、2025-08-21T00:00:00等")
+        
+        if end_time and not end_datetime:
+            raise HTTPException(status_code=400, detail=f"结束时间格式错误: {end_time}，支持格式：2025-08-21、2025-08-21 23:59:59、2025-08-21T23:59:59等")
         
         # 调用服务层导出方法
         csv_content = alert_service.export_alert_events_csv(
