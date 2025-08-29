@@ -27,8 +27,10 @@ class AlarmMonitor:
         self.redis_client = None
         self.is_running = False
         self.monitor_task = None
+        self.alarm_count_task = None  # 告警数量广播任务
         self.executor = ThreadPoolExecutor(max_workers=4)
         self.last_check_time = None
+        self.last_alarm_count = 0  # 上次广播的告警数量
         
     def start(self):
         """启动监控"""
@@ -56,6 +58,8 @@ class AlarmMonitor:
             self.is_running = True
             # 启动异步监控任务
             self.monitor_task = asyncio.create_task(self._monitor_loop())
+            # 启动告警数量广播任务
+            self.alarm_count_task = asyncio.create_task(self._alarm_count_broadcast_loop())
             logger.info("告警监控引擎启动成功")
             
         except Exception as e:
@@ -73,6 +77,13 @@ class AlarmMonitor:
             self.monitor_task.cancel()
             try:
                 await self.monitor_task
+            except asyncio.CancelledError:
+                pass
+        
+        if self.alarm_count_task:
+            self.alarm_count_task.cancel()
+            try:
+                await self.alarm_count_task
             except asyncio.CancelledError:
                 pass
         
@@ -157,6 +168,10 @@ class AlarmMonitor:
                         logger.warning(f"触发告警: {rule.rule_name}, 当前值: {current_value}, 阈值: {rule.operator} {rule.value}")
                         # 发送告警广播
                         await self._send_alarm_broadcast(alert_id, rule, current_value)
+                        # 立即发送告警数量广播
+                        current_count = alert_service.get_active_alert_count()
+                        await self._send_alarm_count_broadcast(current_count)
+                        self.last_alarm_count = current_count
             else:
                 if existing_alert:
                     # 告警恢复
@@ -164,6 +179,10 @@ class AlarmMonitor:
                         logger.info(f"告警恢复: {rule.rule_name}, 当前值: {current_value}")
                         # 发送恢复广播
                         await self._send_alarm_recovery_broadcast(existing_alert.id, rule, current_value)
+                        # 立即发送告警数量广播
+                        current_count = alert_service.get_active_alert_count()
+                        await self._send_alarm_count_broadcast(current_count)
+                        self.last_alarm_count = current_count
                 
         except Exception as e:
             logger.error(f"检查规则失败 {rule.rule_name}: {e}")
@@ -308,6 +327,12 @@ class AlarmMonitor:
                     alert.id, rule, None, reason="规则被删除"
                 )
             
+            # 如果有告警被解除，发送告警数量广播
+            if resolved_alerts:
+                current_count = alert_service.get_active_alert_count()
+                await self._send_alarm_count_broadcast(current_count)
+                self.last_alarm_count = current_count
+            
         except Exception as e:
             logger.error(f"处理规则删除失败: {e}")
     
@@ -443,6 +468,77 @@ class AlarmMonitor:
                 "redis_status": "error",
                 "error": str(e)
             }
+    
+    async def _alarm_count_broadcast_loop(self):
+        """告警数量广播循环"""
+        logger.info("开始告警数量广播循环")
+        
+        while self.is_running:
+            try:
+                # 获取当前告警数量
+                current_count = alert_service.get_active_alert_count()
+                
+                # 定时发送广播（不管数量是否变化）
+                await self._send_alarm_count_broadcast(current_count)
+                
+                # 记录数量变化日志
+                if current_count != self.last_alarm_count:
+                    logger.info(f"告警数量变化: {self.last_alarm_count} -> {current_count}")
+                else:
+                    logger.debug(f"定时广播告警数量: {current_count}")
+                
+                self.last_alarm_count = current_count
+                
+                # 每30秒发送一次广播
+                await asyncio.sleep(30)
+                
+            except asyncio.CancelledError:
+                logger.info("告警数量广播循环被取消")
+                break
+            except Exception as e:
+                logger.error(f"告警数量广播循环异常: {e}")
+                await asyncio.sleep(10)  # 异常时短暂等待
+    
+    async def _send_alarm_count_broadcast(self, alarm_count: int):
+        """发送告警数量广播消息到6005端口"""
+        try:
+            # 构建广播消息
+            broadcast_data = {
+                "type": "alarm_num",
+                "id": f"alarm_num_{int(datetime.now().timestamp())}",
+                "timestamp": datetime.now().isoformat() + "Z",
+                "data": {
+                    "current_alarms": alarm_count,
+                    "update_time": datetime.now().isoformat(),
+                    "server_id": "alarmsrv"
+                }
+            }
+            
+            # 异步发送HTTP请求
+            broadcast_url = "http://localhost:6005/api/v1/broadcast"
+            loop = asyncio.get_event_loop()
+            
+            def send_request():
+                try:
+                    response = requests.post(
+                        broadcast_url,
+                        json=broadcast_data,
+                        timeout=3  # 3秒超时
+                    )
+                    return response.status_code == 200, response.text
+                except Exception as e:
+                    return False, str(e)
+            
+            # 在线程池中执行HTTP请求，避免阻塞
+            success, result = await loop.run_in_executor(self.executor, send_request)
+            
+            if success:
+                logger.debug(f"告警数量广播发送成功: {alarm_count}")
+            else:
+                logger.warning(f"告警数量广播发送失败: 数量={alarm_count}, 错误={result}")
+                
+        except Exception as e:
+            logger.error(f"发送告警数量广播异常: 数量={alarm_count}, 异常={e}")
 
 
 # 创建全局监控实例

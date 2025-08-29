@@ -197,6 +197,16 @@ class AlertService:
                 "data": {"total": 0, "list": []}
             }
     
+    def get_active_alert_count(self) -> int:
+        """获取活跃告警数量"""
+        try:
+            sql = "SELECT COUNT(*) FROM alert WHERE status = 'active'"
+            result = self.db_manager.execute_query(sql)
+            return result[0][0] if result else 0
+        except Exception as e:
+            logger.error(f"获取活跃告警数量失败: {e}")
+            return 0
+    
     def update_alert_value(self, alert_id: int, current_value: float) -> bool:
         """更新告警的当前值"""
         try:
