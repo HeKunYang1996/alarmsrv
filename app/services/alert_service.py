@@ -172,7 +172,7 @@ class AlertService:
             # 查询数据
             data_sql = f"""
             SELECT * FROM alert WHERE {where_clause} 
-            ORDER BY warning_level DESC, triggered_at DESC 
+            ORDER BY warning_level ASC, triggered_at DESC 
             LIMIT ? OFFSET ?
             """
             data_params = list(params) + [page_size, offset]
@@ -224,27 +224,53 @@ class AlertService:
     def resolve_alert(self, alert_id: int, recovery_value: float) -> bool:
         """解除告警（移动到历史表）"""
         try:
-            alert = self.get_alert_by_id(alert_id)
-            if not alert:
-                logger.warning(f"告警ID {alert_id} 不存在")
-                return False
-            
-            # 创建告警事件记录
-            event = AlertEvent.from_alert(alert, "recovery", recovery_value)
-            event_id = self.create_alert_event(event)
-            
-            if event_id:
-                # 删除告警记录
-                delete_sql = "DELETE FROM alert WHERE id = ?"
-                affected = self.db_manager.execute_delete(delete_sql, (alert_id,))
+            # 使用事务确保数据一致性
+            with self.db_manager.get_connection() as conn:
+                # 获取告警信息
+                cursor = conn.execute("SELECT * FROM alert WHERE id = ?", (alert_id,))
+                row = cursor.fetchone()
                 
-                if affected > 0:
-                    logger.info(f"告警已解除，ID: {alert_id}, 移动到事件表: {event_id}")
-                    return True
+                if not row:
+                    logger.warning(f"告警ID {alert_id} 不存在")
+                    return False
+                
+                alert = self._row_to_alert(row)
+                
+                # 创建告警事件记录
+                event = AlertEvent.from_alert(alert, "recovery", recovery_value)
+                
+                # 插入AlertEvent记录
+                event_sql = """
+                INSERT INTO alert_event (
+                    rule_id, rule_snapshot, service_type, channel_id, data_type, point_id,
+                    rule_name, warning_level, operator, threshold_value, trigger_value,
+                    recovery_value, event_type, triggered_at, recovered_at, duration
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """
+                
+                event_params = (
+                    event.rule_id, event.rule_snapshot, event.service_type, event.channel_id,
+                    event.data_type, event.point_id, event.rule_name, event.warning_level,
+                    event.operator, event.threshold_value, event.trigger_value, event.recovery_value,
+                    event.event_type, event.triggered_at, event.recovered_at, event.duration
+                )
+                
+                event_cursor = conn.execute(event_sql, event_params)
+                event_id = event_cursor.lastrowid
+                
+                if event_id:
+                    # 删除告警记录
+                    delete_cursor = conn.execute("DELETE FROM alert WHERE id = ?", (alert_id,))
+                    if delete_cursor.rowcount > 0:
+                        conn.commit()
+                        logger.info(f"告警已解除，ID: {alert_id}, 移动到事件表: {event_id}")
+                        return True
+                    else:
+                        logger.error(f"删除告警记录失败: {alert_id}")
+                        raise Exception(f"删除告警记录失败: {alert_id}")
                 else:
-                    logger.error(f"删除告警记录失败: {alert_id}")
-            
-            return False
+                    logger.error(f"创建告警事件记录失败: {alert_id}")
+                    raise Exception(f"创建告警事件记录失败: {alert_id}")
             
         except Exception as e:
             logger.error(f"解除告警失败: {e}")
@@ -254,24 +280,58 @@ class AlertService:
         """根据规则ID解除所有相关告警（规则被禁用/删除时使用）"""
         resolved_alerts = []
         try:
-            # 获取相关的告警
-            sql = "SELECT * FROM alert WHERE rule_id = ?"
-            results = self.db_manager.execute_query(sql, (rule_id,))
-            
-            for row in results:
-                alert = self._row_to_alert(row)
-                # 创建事件记录（规则变更触发的解除）
-                event = AlertEvent.from_alert(alert, "recovery", None)
-                event_id = self.create_alert_event(event)
+            # 使用事务确保数据一致性
+            with self.db_manager.get_connection() as conn:
+                # 获取相关的告警
+                cursor = conn.execute("SELECT * FROM alert WHERE rule_id = ?", (rule_id,))
+                results = cursor.fetchall()
                 
-                if event_id:
-                    # 删除告警记录
-                    delete_sql = "DELETE FROM alert WHERE id = ?"
-                    if self.db_manager.execute_delete(delete_sql, (alert.id,)):
-                        resolved_alerts.append(alert)
-            
-            logger.info(f"规则ID {rule_id} 相关的 {len(resolved_alerts)} 条告警已解除")
-            return resolved_alerts
+                if not results:
+                    logger.info(f"规则ID {rule_id} 没有相关告警需要解除")
+                    return resolved_alerts
+                
+                # 在事务中处理所有告警
+                for row in results:
+                    alert = self._row_to_alert(row)
+                    
+                    # 创建事件记录（规则变更触发的解除）
+                    event = AlertEvent.from_alert(alert, "recovery", None)
+                    
+                    # 插入AlertEvent记录
+                    event_sql = """
+                    INSERT INTO alert_event (
+                        rule_id, rule_snapshot, service_type, channel_id, data_type, point_id,
+                        rule_name, warning_level, operator, threshold_value, trigger_value,
+                        recovery_value, event_type, triggered_at, recovered_at, duration
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """
+                    
+                    event_params = (
+                        event.rule_id, event.rule_snapshot, event.service_type, event.channel_id,
+                        event.data_type, event.point_id, event.rule_name, event.warning_level,
+                        event.operator, event.threshold_value, event.trigger_value, event.recovery_value,
+                        event.event_type, event.triggered_at, event.recovered_at, event.duration
+                    )
+                    
+                    cursor = conn.execute(event_sql, event_params)
+                    event_id = cursor.lastrowid
+                    
+                    if event_id:
+                        # 删除告警记录
+                        delete_cursor = conn.execute("DELETE FROM alert WHERE id = ?", (alert.id,))
+                        if delete_cursor.rowcount > 0:
+                            resolved_alerts.append(alert)
+                            logger.debug(f"告警已解除: ID={alert.id}, 规则={alert.rule_name}, 事件ID={event_id}")
+                        else:
+                            logger.warning(f"删除告警记录失败: ID={alert.id}")
+                    else:
+                        logger.error(f"创建告警事件记录失败: ID={alert.id}")
+                        raise Exception(f"创建告警事件记录失败: ID={alert.id}")
+                
+                # 提交事务
+                conn.commit()
+                logger.info(f"规则ID {rule_id} 相关的 {len(resolved_alerts)} 条告警已解除")
+                return resolved_alerts
             
         except Exception as e:
             logger.error(f"批量解除告警失败: {e}")

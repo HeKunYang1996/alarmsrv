@@ -78,6 +78,7 @@ class DatabaseManager:
             conn.execute("PRAGMA synchronous=NORMAL;")  # 更好的性能
             conn.execute("PRAGMA cache_size=10000;")    # 增大缓存
             conn.execute("PRAGMA temp_store=memory;")   # 临时表存储在内存中
+            conn.execute("PRAGMA foreign_keys=ON;")     # 启用外键约束
             
         except Exception as e:
             logger.error(f"启用WAL模式失败: {e}")
@@ -212,6 +213,7 @@ class DatabaseManager:
         try:
             conn = sqlite3.connect(self.db_path, timeout=self.timeout)
             conn.row_factory = sqlite3.Row  # 使结果可以按列名访问
+            conn.execute("PRAGMA foreign_keys=ON;")  # 确保每个连接都启用外键约束
             yield conn
         except Exception as e:
             if conn:
