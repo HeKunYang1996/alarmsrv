@@ -138,7 +138,8 @@ class AlertRule:
         if not self.channel_id or self.channel_id <= 0:
             return False
         
-        if self.data_type not in ["T", "S", "C", "A"]:
+        # data_type现在支持自定义，不再限制固定值
+        if not self.data_type or self.data_type.strip() == "":
             return False
             
         if not self.point_id or self.point_id <= 0:
@@ -168,8 +169,9 @@ class AlertRule:
         if not self.channel_id or self.channel_id <= 0:
             return False, f"通道ID必须大于0，当前值: {self.channel_id}"
         
-        if self.data_type not in ["T", "S", "C", "A"]:
-            return False, f"不支持的数据类型'{self.data_type}'，支持的类型: T(温度), S(状态), C(通信), A(模拟量)"
+        # data_type现在支持自定义，不再限制固定值
+        if not self.data_type or self.data_type.strip() == "":
+            return False, f"数据类型不能为空，当前值: '{self.data_type}'"
             
         if not self.point_id or self.point_id <= 0:
             return False, f"点位ID必须大于0，当前值: {self.point_id}"

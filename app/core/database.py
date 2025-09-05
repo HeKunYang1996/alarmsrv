@@ -142,7 +142,7 @@ class DatabaseManager:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 service_type TEXT NOT NULL DEFAULT 'comsrv' CHECK(service_type IN ('comsrv', 'rulesrv', 'modsrv', 'alarmsrv', 'hissrv', 'netsrv')),
                 channel_id INTEGER NOT NULL,
-                data_type TEXT NOT NULL CHECK(data_type IN ('T', 'S', 'C', 'A')),
+                data_type TEXT NOT NULL,
                 point_id INTEGER NOT NULL,
                 rule_name TEXT NOT NULL,
                 warning_level INTEGER NOT NULL CHECK(warning_level IN (1, 2, 3)),

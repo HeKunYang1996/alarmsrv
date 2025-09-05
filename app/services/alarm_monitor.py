@@ -347,8 +347,10 @@ class AlarmMonitor:
                 "data": {
                     "alarm_id": str(alert_id),
                     "service_type": rule.service_type,
+                    "source": rule.service_type,  # 服务类型
+                    "device": str(rule.channel_id),  # 设备标识（通道ID）
                     "channel_id": rule.channel_id,
-                    "data_type": rule.data_type,  # 添加数据类型: T(温度), S(状态), C(通信), A(模拟量)
+                    "data_type": rule.data_type,  # 支持自定义数据类型
                     "point_id": rule.point_id,
                     "status": 1,  # 1表示触发状态
                     "level": rule.warning_level,
@@ -357,28 +359,46 @@ class AlarmMonitor:
                 }
             }
             
-            # 异步发送HTTP请求
-            broadcast_url = "http://localhost:6005/api/v1/broadcast"
+            # 多端点广播 - 同时向6005和6006端口发送
+            broadcast_urls = [
+                "http://localhost:6005/api/v1/broadcast",
+                "http://localhost:6006/netApi/alarm/broadcast"
+            ]
             loop = asyncio.get_event_loop()
             
-            def send_request():
+            def send_request(url):
                 try:
                     response = requests.post(
-                        broadcast_url,
+                        url,
                         json=broadcast_data,
                         timeout=3  # 3秒超时
                     )
-                    return response.status_code == 200, response.text
+                    return url, response.status_code == 200, response.text
                 except Exception as e:
-                    return False, str(e)
+                    return url, False, str(e)
             
-            # 在线程池中执行HTTP请求，避免阻塞
-            success, result = await loop.run_in_executor(self.executor, send_request)
+            # 并行发送到多个端点
+            tasks = []
+            for url in broadcast_urls:
+                task = loop.run_in_executor(self.executor, send_request, url)
+                tasks.append(task)
             
-            if success:
-                logger.info(f"告警广播发送成功: 规则={rule.rule_name}, 告警ID={alert_id}")
-            else:
-                logger.warning(f"告警广播发送失败: 规则={rule.rule_name}, 告警ID={alert_id}, 错误={result}")
+            # 等待所有广播完成
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            success_count = 0
+            for result in results:
+                if isinstance(result, Exception):
+                    logger.error(f"告警广播异常: 规则={rule.rule_name}, 告警ID={alert_id}, 异常={result}")
+                else:
+                    url, success, response_text = result
+                    if success:
+                        success_count += 1
+                        logger.info(f"告警广播发送成功: 规则={rule.rule_name}, 告警ID={alert_id}, 端点={url}")
+                    else:
+                        logger.warning(f"告警广播发送失败: 规则={rule.rule_name}, 告警ID={alert_id}, 端点={url}, 错误={response_text}")
+            
+            logger.info(f"告警广播完成: 规则={rule.rule_name}, 告警ID={alert_id}, 成功={success_count}/{len(broadcast_urls)}")
                 
         except Exception as e:
             logger.error(f"发送告警广播异常: 规则={rule.rule_name}, 告警ID={alert_id}, 异常={e}")
@@ -402,8 +422,10 @@ class AlarmMonitor:
                 "data": {
                     "alarm_id": str(alert_id),
                     "service_type": rule.service_type,
+                    "source": rule.service_type,  # 服务类型
+                    "device": str(rule.channel_id),  # 设备标识（通道ID）
                     "channel_id": rule.channel_id,
-                    "data_type": rule.data_type,
+                    "data_type": rule.data_type,  # 支持自定义数据类型
                     "point_id": rule.point_id,
                     "status": 0,  # 0表示恢复状态
                     "level": rule.warning_level,
@@ -412,28 +434,46 @@ class AlarmMonitor:
                 }
             }
             
-            # 异步发送HTTP请求
-            broadcast_url = "http://localhost:6005/api/v1/broadcast"
+            # 多端点广播 - 同时向6005和6006端口发送
+            broadcast_urls = [
+                "http://localhost:6005/api/v1/broadcast",
+                "http://localhost:6006/netApi/alarm/broadcast"
+            ]
             loop = asyncio.get_event_loop()
             
-            def send_request():
+            def send_request(url):
                 try:
                     response = requests.post(
-                        broadcast_url,
+                        url,
                         json=broadcast_data,
                         timeout=3  # 3秒超时
                     )
-                    return response.status_code == 200, response.text
+                    return url, response.status_code == 200, response.text
                 except Exception as e:
-                    return False, str(e)
+                    return url, False, str(e)
             
-            # 在线程池中执行HTTP请求，避免阻塞
-            success, result = await loop.run_in_executor(self.executor, send_request)
+            # 并行发送到多个端点
+            tasks = []
+            for url in broadcast_urls:
+                task = loop.run_in_executor(self.executor, send_request, url)
+                tasks.append(task)
             
-            if success:
-                logger.info(f"告警恢复广播发送成功: 规则={rule.rule_name}, 告警ID={alert_id}")
-            else:
-                logger.warning(f"告警恢复广播发送失败: 规则={rule.rule_name}, 告警ID={alert_id}, 错误={result}")
+            # 等待所有广播完成
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            success_count = 0
+            for result in results:
+                if isinstance(result, Exception):
+                    logger.error(f"告警恢复广播异常: 规则={rule.rule_name}, 告警ID={alert_id}, 异常={result}")
+                else:
+                    url, success, response_text = result
+                    if success:
+                        success_count += 1
+                        logger.info(f"告警恢复广播发送成功: 规则={rule.rule_name}, 告警ID={alert_id}, 端点={url}")
+                    else:
+                        logger.warning(f"告警恢复广播发送失败: 规则={rule.rule_name}, 告警ID={alert_id}, 端点={url}, 错误={response_text}")
+            
+            logger.info(f"告警恢复广播完成: 规则={rule.rule_name}, 告警ID={alert_id}, 成功={success_count}/{len(broadcast_urls)}")
                 
         except Exception as e:
             logger.error(f"发送告警恢复广播异常: 规则={rule.rule_name}, 告警ID={alert_id}, 异常={e}")
@@ -514,28 +554,46 @@ class AlarmMonitor:
                 }
             }
             
-            # 异步发送HTTP请求
-            broadcast_url = "http://localhost:6005/api/v1/broadcast"
+            # 多端点广播 - 同时向6005和6006端口发送
+            broadcast_urls = [
+                "http://localhost:6005/api/v1/broadcast",
+                "http://localhost:6006/netApi/alarm/broadcast"
+            ]
             loop = asyncio.get_event_loop()
             
-            def send_request():
+            def send_request(url):
                 try:
                     response = requests.post(
-                        broadcast_url,
+                        url,
                         json=broadcast_data,
                         timeout=3  # 3秒超时
                     )
-                    return response.status_code == 200, response.text
+                    return url, response.status_code == 200, response.text
                 except Exception as e:
-                    return False, str(e)
+                    return url, False, str(e)
             
-            # 在线程池中执行HTTP请求，避免阻塞
-            success, result = await loop.run_in_executor(self.executor, send_request)
+            # 并行发送到多个端点
+            tasks = []
+            for url in broadcast_urls:
+                task = loop.run_in_executor(self.executor, send_request, url)
+                tasks.append(task)
             
-            if success:
-                logger.debug(f"告警数量广播发送成功: {alarm_count}")
-            else:
-                logger.warning(f"告警数量广播发送失败: 数量={alarm_count}, 错误={result}")
+            # 等待所有广播完成
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            success_count = 0
+            for result in results:
+                if isinstance(result, Exception):
+                    logger.error(f"告警数量广播异常: 数量={alarm_count}, 异常={result}")
+                else:
+                    url, success, response_text = result
+                    if success:
+                        success_count += 1
+                        logger.debug(f"告警数量广播发送成功: 数量={alarm_count}, 端点={url}")
+                    else:
+                        logger.warning(f"告警数量广播发送失败: 数量={alarm_count}, 端点={url}, 错误={response_text}")
+            
+            logger.debug(f"告警数量广播完成: 数量={alarm_count}, 成功={success_count}/{len(broadcast_urls)}")
                 
         except Exception as e:
             logger.error(f"发送告警数量广播异常: 数量={alarm_count}, 异常={e}")
