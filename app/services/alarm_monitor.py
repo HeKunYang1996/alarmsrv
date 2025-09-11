@@ -169,9 +169,8 @@ class AlarmMonitor:
                         # 发送告警广播
                         await self._send_alarm_broadcast(alert_id, rule, current_value)
                         # 立即发送告警数量广播
-                        current_count = alert_service.get_active_alert_count()
-                        await self._send_alarm_count_broadcast(current_count)
-                        self.last_alarm_count = current_count
+                        await self._send_alarm_count_broadcast()
+                        self.last_alarm_count = alert_service.get_active_alert_count()
             else:
                 if existing_alert:
                     # 告警恢复
@@ -180,9 +179,8 @@ class AlarmMonitor:
                         # 发送恢复广播
                         await self._send_alarm_recovery_broadcast(existing_alert.id, rule, current_value)
                         # 立即发送告警数量广播
-                        current_count = alert_service.get_active_alert_count()
-                        await self._send_alarm_count_broadcast(current_count)
-                        self.last_alarm_count = current_count
+                        await self._send_alarm_count_broadcast()
+                        self.last_alarm_count = alert_service.get_active_alert_count()
                 
         except Exception as e:
             logger.error(f"检查规则失败 {rule.rule_name}: {e}")
@@ -329,9 +327,8 @@ class AlarmMonitor:
             
             # 如果有告警被解除，发送告警数量广播
             if resolved_alerts:
-                current_count = alert_service.get_active_alert_count()
-                await self._send_alarm_count_broadcast(current_count)
-                self.last_alarm_count = current_count
+                await self._send_alarm_count_broadcast()
+                self.last_alarm_count = alert_service.get_active_alert_count()
             
         except Exception as e:
             logger.error(f"处理规则删除失败: {e}")
@@ -515,11 +512,11 @@ class AlarmMonitor:
         
         while self.is_running:
             try:
-                # 获取当前告警数量
-                current_count = alert_service.get_active_alert_count()
-                
                 # 定时发送广播（不管数量是否变化）
-                await self._send_alarm_count_broadcast(current_count)
+                await self._send_alarm_count_broadcast()
+                
+                # 获取当前告警数量用于日志记录
+                current_count = alert_service.get_active_alert_count()
                 
                 # 记录数量变化日志
                 if current_count != self.last_alarm_count:
@@ -539,16 +536,22 @@ class AlarmMonitor:
                 logger.error(f"告警数量广播循环异常: {e}")
                 await asyncio.sleep(10)  # 异常时短暂等待
     
-    async def _send_alarm_count_broadcast(self, alarm_count: int):
+    async def _send_alarm_count_broadcast(self):
         """发送告警数量广播消息到6005端口"""
         try:
+            # 获取按等级分类的告警数量
+            level_counts = alert_service.get_active_alert_count_by_level()
+            
             # 构建广播消息
             broadcast_data = {
                 "type": "alarm_num",
                 "id": f"alarm_num_{int(datetime.now().timestamp())}",
                 "timestamp": datetime.now().isoformat() + "Z",
                 "data": {
-                    "current_alarms": alarm_count,
+                    "current_alarms": level_counts["current_alarms"],
+                    "1": level_counts["1"],
+                    "2": level_counts["2"],
+                    "3": level_counts["3"],
                     "update_time": datetime.now().isoformat(),
                     "server_id": "alarmsrv"
                 }
@@ -584,19 +587,19 @@ class AlarmMonitor:
             success_count = 0
             for result in results:
                 if isinstance(result, Exception):
-                    logger.error(f"告警数量广播异常: 数量={alarm_count}, 异常={result}")
+                    logger.error(f"告警数量广播异常: 异常={result}")
                 else:
                     url, success, response_text = result
                     if success:
                         success_count += 1
-                        logger.debug(f"告警数量广播发送成功: 数量={alarm_count}, 端点={url}")
+                        logger.debug(f"告警数量广播发送成功: 端点={url}")
                     else:
-                        logger.warning(f"告警数量广播发送失败: 数量={alarm_count}, 端点={url}, 错误={response_text}")
+                        logger.warning(f"告警数量广播发送失败: 端点={url}, 错误={response_text}")
             
-            logger.debug(f"告警数量广播完成: 数量={alarm_count}, 成功={success_count}/{len(broadcast_urls)}")
+            logger.debug(f"告警数量广播完成: 成功={success_count}/{len(broadcast_urls)}")
                 
         except Exception as e:
-            logger.error(f"发送告警数量广播异常: 数量={alarm_count}, 异常={e}")
+            logger.error(f"发送告警数量广播异常: 异常={e}")
 
 
 # 创建全局监控实例

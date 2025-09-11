@@ -207,6 +207,44 @@ class AlertService:
             logger.error(f"获取活跃告警数量失败: {e}")
             return 0
     
+    def get_active_alert_count_by_level(self) -> Dict[str, int]:
+        """获取按等级分类的活跃告警数量"""
+        try:
+            # 获取总数
+            total_count = self.get_active_alert_count()
+            
+            # 按等级统计
+            level_sql = """
+            SELECT warning_level, COUNT(*) FROM alert 
+            WHERE status = 'active' 
+            GROUP BY warning_level
+            """
+            level_results = self.db_manager.execute_query(level_sql)
+            
+            # 初始化等级统计，确保所有等级都有值
+            level_counts = {"1": 0, "2": 0, "3": 0}
+            
+            # 填充实际数据
+            for row in level_results:
+                level_counts[str(row[0])] = row[1]
+            
+            # 返回包含总数和等级统计的字典
+            return {
+                "current_alarms": total_count,
+                "1": level_counts["1"],
+                "2": level_counts["2"], 
+                "3": level_counts["3"]
+            }
+            
+        except Exception as e:
+            logger.error(f"获取按等级分类告警数量失败: {e}")
+            return {
+                "current_alarms": 0,
+                "1": 0,
+                "2": 0,
+                "3": 0
+            }
+    
     def update_alert_value(self, alert_id: int, current_value: float) -> bool:
         """更新告警的当前值"""
         try:
