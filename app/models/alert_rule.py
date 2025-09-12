@@ -76,8 +76,8 @@ class AlertRule:
             "value": self.value,
             "enabled": self.enabled,
             "description": self.description,
-            "created_at": self.timestamp_to_isoformat(self.created_at),
-            "updated_at": self.timestamp_to_isoformat(self.updated_at),
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
         }
 
     @classmethod

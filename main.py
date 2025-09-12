@@ -222,7 +222,7 @@ async def create_alert_rule(rule_data: dict):
                     "existing_rule": {
                         "id": existing_rule.id,
                         "rule_name": existing_rule.rule_name,
-                        "created_at": AlertRule.timestamp_to_isoformat(existing_rule.created_at) if existing_rule.created_at else None
+                        "created_at": existing_rule.created_at
                     },
                     "suggestion": f"请更换其他点位或修改现有规则 ID:{existing_rule.id}"
                 }

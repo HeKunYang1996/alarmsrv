@@ -340,7 +340,7 @@ class AlarmMonitor:
             broadcast_data = {
                 "type": "alarm",
                 "id": f"alarm_{alert_id:03d}",
-                "timestamp": datetime.now().isoformat() + "Z",
+                "timestamp": int(datetime.now().timestamp()),
                 "data": {
                     "alarm_id": str(alert_id),
                     "service_type": rule.service_type,
@@ -415,7 +415,7 @@ class AlarmMonitor:
             broadcast_data = {
                 "type": "alarm",
                 "id": f"alarm_{alert_id:03d}_recovery",
-                "timestamp": datetime.now().isoformat() + "Z",
+                "timestamp": int(datetime.now().timestamp()),
                 "data": {
                     "alarm_id": str(alert_id),
                     "service_type": rule.service_type,
@@ -546,13 +546,13 @@ class AlarmMonitor:
             broadcast_data = {
                 "type": "alarm_num",
                 "id": f"alarm_num_{int(datetime.now().timestamp())}",
-                "timestamp": datetime.now().isoformat() + "Z",
+                "timestamp": int(datetime.now().timestamp()),
                 "data": {
                     "current_alarms": level_counts["current_alarms"],
                     "1": level_counts["1"],
                     "2": level_counts["2"],
                     "3": level_counts["3"],
-                    "update_time": datetime.now().isoformat(),
+                    "update_time": int(datetime.now().timestamp()),
                     "server_id": "alarmsrv"
                 }
             }

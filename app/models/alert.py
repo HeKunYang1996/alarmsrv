@@ -56,7 +56,7 @@ class Alert:
             "threshold_value": self.threshold_value,
             "current_value": self.current_value,
             "status": self.status,
-            "triggered_at": self.timestamp_to_isoformat(self.triggered_at),
+            "triggered_at": self.triggered_at,
         }
     
     @classmethod
@@ -146,8 +146,8 @@ class AlertEvent:
             "trigger_value": self.trigger_value,
             "recovery_value": self.recovery_value,
             "event_type": self.event_type,
-            "triggered_at": self.timestamp_to_isoformat(self.triggered_at),
-            "recovered_at": self.timestamp_to_isoformat(self.recovered_at),
+            "triggered_at": self.triggered_at,
+            "recovered_at": self.recovered_at,
             "duration": self.duration,
         }
     
